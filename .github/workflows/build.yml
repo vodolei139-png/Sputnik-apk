@@ -62,7 +62,7 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      -      - name: Build APK with Buildozer
+      - name: Build APK with Buildozer
         env:
           PIP_PLATFORM: android_24_arm64_v8a
         run: |
