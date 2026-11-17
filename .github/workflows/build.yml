@@ -1,16 +1,3 @@
-      - name: Build APK with Buildozer
-        run: |
-          yes | buildozer android debug || buildozer android debug || true
-          mkdir -p bin
-          ls -la bin || true
-        continue-on-error: false
-
-      - name: Upload log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: .buildozer/android/platform/build-*/**/*.log
 name: Build APK
 
 on:
@@ -69,15 +56,19 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Build APK with Buildozer
+      -      - name: Build APK with Buildozer
         run: |
-          yes | buildozer android debug || buildozer android debug
+          yes | buildozer android debug || buildozer android debug || true
+          mkdir -p bin
+          ls -la bin || true
+        continue-on-error: false
 
-      - name: Upload Artifact
+      - name: Upload log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sputnik-apk
-          path: bin/*.apk
+          name: build-log
+          path: .buildozer/android/platform/build-*/**/*.log
 
       - name: Release
         uses: softprops/action-gh-release@v2
