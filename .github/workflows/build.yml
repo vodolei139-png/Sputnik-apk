@@ -118,7 +118,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          files: bin/*.apk
+          body: |
+            Сборка из коммита: ${{ github.sha }}
+            Дата: ${{ github.event.head_commit.timestamp }}
+            Файлы сборки: buildozer.spec, main.py, .github/workflows/build.yml
+          files: | 
+           bin/*.apk
+           build_log.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
