@@ -1,158 +1,174 @@
 import os
-import json
-import datetime
-
+from datetime import datetime
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
 
-try:
-    from jnius import autoclass
-    MediaRecorder = autoclass('android.media.MediaRecorder')
-    ON_ANDROID = True
-except ImportError:
-    ON_ANDROID = False  # запуск на ПК: интерфейс виден, запись отключена
+from jnius import autoclass
+
+MediaRecorder = autoclass('android.media.MediaRecorder')
+MediaPlayer = autoclass('android.media.MediaPlayer')
+Environment = autoclass('android.os.Environment')
+
+AUDIO_SOURCES = {
+    'mic': MediaRecorder.AudioSource.MIC,
+}
+OUTPUT_FORMATS = {
+    'm4a': MediaRecorder.OutputFormat.MPEG_4,
+}
+ENCODERS = {
+    'm4a': MediaRecorder.AudioEncoder.AAC,
+}
 
 
-NOTES_FILE = 'notes.json'
-
-
-class DiktofonApp(App):
+class DictophoneApp(App):
+    title = 'Диктофон с заметками'
 
     def build(self):
-        Window.clearcolor = (0.96, 0.96, 0.97, 1)
-        layout = BoxLayout(orientation='vertical', padding=12, spacing=10)
-
-        title = Label(text='Диктофон с заметками', size_hint_y=None, height=36,
-                      bold=True, color=(0.15, 0.15, 0.2, 1), font_size='20sp')
-        layout.add_widget(title)
-
-        self.status = Label(text='Готов к записи', size_hint_y=None, height=28,
-                            color=(0.3, 0.3, 0.35, 1))
-        layout.add_widget(self.status)
-
-        self.btn_rec = Button(text='● НАЧАТЬ ЗАПИСЬ', size_hint_y=None, height=64,
-                              background_color=(0.65, 0.18, 0.18, 1), font_size='18sp')
-        self.btn_rec.bind(on_press=self.toggle_record)
-        layout.add_widget(self.btn_rec)
-
-        self.inp_note = TextInput(hint_text='Текст заметки (можно оставить пустым)',
-                                  size_hint_y=None, height=70, multiline=True)
-        layout.add_widget(self.inp_note)
-
-        self.inp_search = TextInput(hint_text='Поиск по заметкам', size_hint_y=None,
-                                    height=44, multiline=False)
-        self.inp_search.bind(text=lambda *a: self.refresh_list())
-        layout.add_widget(self.inp_search)
-
-        self.list_box = GridLayout(cols=1, size_hint_y=None, spacing=8)
-        self.list_box.bind(minimum_height=self.list_box.setter('height'))
-        scroll = ScrollView(bar_width=6)
-        scroll.add_widget(self.list_box)
-        layout.add_widget(scroll)
+        # Папка, которую видно в настройках приложения
+        self.audio_dir = os.path.join(self.user_data_dir, 'recordings')
+        os.makedirs(self.audio_dir, exist_ok=True)
 
         self.recorder = None
-        self.audio_path = None
-        self.notes = self.load_notes()
-        self.refresh_list()
-        return layout
+        self.player = None
+        self.current_file = None
+        self.recording = False
 
-    # ---------- запись ----------
+        root = BoxLayout(orientation='vertical', padding=10, spacing=10)
+
+        self.status = Label(
+            text='Готов к записи',
+            size_hint=(1, None), height=30,
+            color=(0.1, 0.1, 0.1, 1))
+        root.add_widget(self.status)
+
+        self.rec_btn = Button(
+            text='НАЧАТЬ ЗАПИСЬ',
+            size_hint=(1, None), height=60,
+            background_color=(0.35, 0.05, 0.05, 1))
+        self.rec_btn.bind(on_press=self.toggle_record)
+        root.add_widget(self.rec_btn)
+
+        self.note_input = TextInput(
+            hint_text='Текст заметки (можно оставить пустым)',
+            size_hint=(1, None), height=50,
+            multiline=False)
+        root.add_widget(self.note_input)
+
+        self.path_label = Label(
+            text='Папка записей:\n' + self.audio_dir,
+            size_hint=(1, None), height=60,
+            color=(0.2, 0.2, 0.2, 1),
+            halign='left')
+        self.path_label.bind(size=lambda w, s: setattr(w.texture_size, 'x', s[0]))
+        root.add_widget(self.path_label)
+
+        self.list_scroll = ScrollView()
+        self.list_box = BoxLayout(
+            orientation='vertical', spacing=6, size_hint_y=None)
+        self.list_box.bind(minimum_height=self.list_box.setter('height'))
+        self.list_scroll.add_widget(self.list_box)
+        root.add_widget(self.list_scroll)
+
+        self.refresh_list()
+        return root
 
     def toggle_record(self, *args):
-        if not ON_ANDROID:
-            self.status.text = 'Запись работает только на Android'
-            return
-        if self.recorder is None:
+        if not self.recording:
             self.start_record()
         else:
             self.stop_record()
 
     def start_record(self):
-        ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.audio_path = os.path.join(self.user_data_dir, 'rec_%s.m4a' % ts)
-        rec = MediaRecorder()
-        rec.setAudioSource(6)   # AudioSource.MIC
-        rec.setOutputFormat(2)  # MPEG_4
-        rec.setAudioEncoder(3)  # AAC
-        rec.setOutputFile(self.audio_path)
-        rec.prepare()
-        rec.start()
-        self.recorder = rec
-        self.btn_rec.text = '■ ОСТАНОВИТЬ'
-        self.btn_rec.background_color = (0.2, 0.45, 0.2, 1)
-        self.status.text = 'Идёт запись… говорите!'
+        try:
+            self.current_file = os.path.join(
+                self.audio_dir,
+                datetime.now().strftime('rec_%Y%m%d_%H%M%S.m4a'))
+            r = MediaRecorder()
+            r.setAudioSource(AUDIO_SOURCES['mic'])
+            r.setOutputFormat(OUTPUT_FORMATS['m4a'])
+            r.setAudioEncoder(ENCODERS['m4a'])
+            r.setOutputFile(self.current_file)
+            r.prepare()
+            r.start()
+            self.recorder = r
+            self.recording = True
+            self.rec_btn.text = 'ОСТАНОВИТЬ И СОХРАНИТЬ'
+            self.status.text = 'Идёт запись…'
+        except Exception as e:
+            self.status.text = 'Ошибка запуска записи: %s' % e
 
     def stop_record(self):
+        note = self.note_input.text.strip()
         try:
             self.recorder.stop()
-        finally:
             self.recorder.release()
-            self.recorder = None
-        self.btn_rec.text = '● НАЧАТЬ ЗАПИСЬ'
-        self.btn_rec.background_color = (0.65, 0.18, 0.18, 1)
-        self.add_note(text=self.inp_note.text.strip(),
-                      audio=os.path.basename(self.audio_path))
-        self.inp_note.text = ''
-        self.status.text = 'Запись сохранена'
-
-    # ---------- заметки ----------
-
-    def notes_file(self):
-        return os.path.join(self.user_data_dir, NOTES_FILE)
-
-    def load_notes(self):
-        try:
-            with open(self.notes_file(), 'r', encoding='utf-8') as f:
-                return json.load(f)
         except Exception:
-            return []
+            pass
+        self.recorder = None
+        self.recording = False
+        self.rec_btn.text = 'НАЧАТЬ ЗАПИСЬ'
 
-    def save_notes(self):
-        with open(self.notes_file(), 'w', encoding='utf-8') as f:
-            json.dump(self.notes, f, ensure_ascii=False, indent=1)
-
-    def add_note(self, text, audio):
-        self.notes.insert(0, {
-            'date': datetime.datetime.now().strftime('%d.%m.%Y %H:%M'),
-            'text': text or '(без текста)',
-            'audio': audio,
-        })
-        self.save_notes()
+        # Заметка хранится рядом с файлом: тот же путь + .txt
+        if note:
+            with open(self.current_file + '.txt', 'w', encoding='utf-8') as f:
+                f.write(note)
+        self.note_input.text = ''
+        self.status.text = 'Сохранено:\n' + os.path.basename(self.current_file)
         self.refresh_list()
 
     def refresh_list(self):
-        query = self.inp_search.text.strip().lower() if hasattr(self, 'inp_search') else ''
         self.list_box.clear_widgets()
-        for note in self.notes:
-            if query and query not in note['text'].lower():
+        for name in sorted(os.listdir(self.audio_dir), reverse=True):
+            if not name.endswith('.m4a'):
                 continue
-            text = note['text'] if len(note['text']) <= 80 else note['text'][:80] + '…'
-            btn = Button(text='%s\n%s' % (note['date'], text),
-                         size_hint_y=None, height=80,
-                         halign='left', valign='middle',
-                         background_color=(1, 1, 1, 1),
-                         color=(0.1, 0.1, 0.15, 1))
-            btn.bind(size=lambda w, s: setattr(w, 'text_size', s))
+            stamp = name.replace('rec_', '').replace('.m4a', '')
+            txt_path = os.path.join(self.audio_dir, name + '.txt')
+            note = ''
+            if os.path.exists(txt_path):
+                with open(txt_path, encoding='utf-8') as f:
+                    note = f.read().strip()
+            pretty = datetime.strptime(stamp, '%Y%m%d_%H%M%S')
+            label = pretty.strftime('%d.%m.%Y %H:%M') + \
+                ('  ' + note if note else '  (без текста)')
+            btn = Button(
+                text=label,
+                size_hint=(1, None), height=50,
+                background_color=(0.85, 0.85, 0.85, 1),
+                color=(0.1, 0.1, 0.1, 1))
+            btn.bind(on_press=lambda inst, fn=name: self.play(fn))
             self.list_box.add_widget(btn)
-        if not self.list_box.children:
-            self.list_box.add_widget(Label(text='Заметок пока нет — запишите первую!',
-                                           size_hint_y=None, height=60,
-                                           color=(0.5, 0.5, 0.55, 1)))
 
-    def on_start(self):
-        if ON_ANDROID:
+    def play(self, filename):
+        if self.player:
             try:
-                from android.permissions import request_permissions, Permission
-                request_permissions([Permission.RECORD_AUDIO])
+                self.player.release()
+            except Exception:
+                pass
+        path = os.path.join(self.audio_dir, filename)
+        self.player = MediaPlayer()
+        self.player.setDataSource(path)
+        self.player.prepare()
+        self.player.start()
+        self.status.text = 'Проигрываю: ' + filename
+
+    def on_stop(self):
+        if self.recorder:
+            try:
+                self.recorder.stop()
+                self.recorder.release()
+            except Exception:
+                pass
+        if self.player:
+            try:
+                self.player.release()
             except Exception:
                 pass
 
 
 if __name__ == '__main__':
-    DiktofonApp().run()
+    DictophoneApp().run()
