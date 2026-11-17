@@ -44,6 +44,23 @@ jobs:
           rm -rf ~/.buildozer
           sudo rm -rf /var/tmp/pip-*
 
+      - name: Pre-clone and patch python-for-android
+        run: |
+          mkdir -p .buildozer/android/platform
+          git clone -b master --single-branch https://github.com/kivy/python-for-android.git .buildozer/android/platform/python-for-android
+          cd .buildozer/android/platform/python-for-android
+          python3 - <<'EOF'
+          p = 'pythonforandroid/build.py'
+          s = open(p, encoding='utf-8').read()
+          old = '--no-deps -r requirements.txt'
+          new = '--no-deps --platform android_24_arm64_v8a -r requirements.txt'
+          n = s.count(old)
+          s = s.replace(old, new)
+          open(p, 'w', encoding='utf-8').write(s)
+          print('patched occurrences:', n)
+          EOF
+          grep -n "platform android_24" pythonforandroid/build.py | head -n 10
+
       - name: Fix buildozer.spec
         run: |
           sed -i 's/^#* *android.api *=.*/android.api = 31/' buildozer.spec || true
@@ -63,14 +80,11 @@ jobs:
           fi
 
       - name: Build APK with Buildozer
-        env:
-          PIP_PLATFORM: android_24_arm64_v8a
         run: |
           set +e
           yes | buildozer android debug > build_log.txt 2>&1
           tail -n 200 build_log.txt
-          grep -n -i -E "error|failed|traceback" build_log.txt | tail -n 50 || true
-          REQ=$(find .buildozer -name requirements.txt -path '*build*' 2>/dev/null | head -n 1)
+          REQ=$(find .buildozer -name requirements.txt -not -path '*doc*' | head -n 1)
           echo "=== requirements.txt: $REQ ==="
           cat "$REQ" || true
           mkdir -p bin
