@@ -81,6 +81,8 @@ jobs:
 
       - name: Build APK with Buildozer
         run: |
+          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
           set +e
           yes | buildozer android debug > build_log.txt 2>&1
           tail -n 200 build_log.txt
@@ -90,6 +92,7 @@ jobs:
           mkdir -p bin
           ls -la bin || true
           test -f bin/*.apk
+
 
       - name: Upload log
         if: always()
