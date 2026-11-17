@@ -56,19 +56,22 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      -      - name: Build APK with Buildozer
+      - name: Build APK with Buildozer
         run: |
-          yes | buildozer android debug || buildozer android debug || true
+          set +e
+          yes | buildozer android debug > build_log.txt 2>&1
+          tail -n 200 build_log.txt
+          grep -n -i -E "error|failed|traceback" build_log.txt | tail -n 50 || true
           mkdir -p bin
           ls -la bin || true
-        continue-on-error: false
+          test -f bin/*.apk
 
       - name: Upload log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
-          path: .buildozer/android/platform/build-*/**/*.log
+          path: build_log.txt
 
       - name: Release
         uses: softprops/action-gh-release@v2
