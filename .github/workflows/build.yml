@@ -21,7 +21,18 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev cmake libffi-dev libssl-dev build-essential ccache libncurses-dev
+          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf automake libtool pkg-config zlib1g-dev cmake libffi-dev libssl-dev build-essential ccache libncurses-dev libltdl-dev
+
+      - name: Downgrade libtool to 2.4.7
+        run: |
+          wget -q https://ftp.gnu.org/gnu/libtool/libtool-2.4.7.tar.gz
+          tar -xzf libtool-2.4.7.tar.gz
+          cd libtool-2.4.7
+          ./configure --prefix=/usr
+          make -j4
+          sudo make install
+          sudo ldconfig
+          libtoolize --version
 
       - name: Install Buildozer and Cython
         run: |
@@ -32,11 +43,6 @@ jobs:
         run: |
           rm -rf ~/.buildozer
           sudo rm -rf /var/tmp/pip-*
-
-      - name: Patch pyjnius recipe
-        run: |
-          RECIPE_DIR=$(find ~/.buildozer -type d -path '*recipes/pyjnius' 2>/dev/null | head -n 1 || true)
-          echo "pyjnius recipe dir: $RECIPE_DIR"
 
       - name: Fix buildozer.spec
         run: |
