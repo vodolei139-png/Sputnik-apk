@@ -62,12 +62,17 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Build APK with Buildozer
+      -      - name: Build APK with Buildozer
+        env:
+          PIP_PLATFORM: android_24_arm64_v8a
         run: |
           set +e
           yes | buildozer android debug > build_log.txt 2>&1
           tail -n 200 build_log.txt
           grep -n -i -E "error|failed|traceback" build_log.txt | tail -n 50 || true
+          REQ=$(find .buildozer -name requirements.txt -path '*build*' 2>/dev/null | head -n 1)
+          echo "=== requirements.txt: $REQ ==="
+          cat "$REQ" || true
           mkdir -p bin
           ls -la bin || true
           test -f bin/*.apk
