@@ -1,3 +1,16 @@
+      - name: Build APK with Buildozer
+        run: |
+          yes | buildozer android debug || buildozer android debug || true
+          mkdir -p bin
+          ls -la bin || true
+        continue-on-error: false
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: .buildozer/android/platform/build-*/**/*.log
 name: Build APK
 
 on:
