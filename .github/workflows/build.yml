@@ -1,72 +1,11 @@
-name: Build APK (Native Ubuntu)
-
-on:
-  push:
-    branches: [ "main" ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential git zip unzip autoconf automake libtool libltdl-dev pkg-config zlib1g-dev libffi-dev libssl-dev openjdk-17-jdk
-
-      - name: Install Buildozer and Cython
-        run: |
-          pip install -U buildozer cython
-
-      - name: Clean old Buildozer cache
-        run: |
-          rm -rf ~/.buildozer .buildozer
-
-      - name: Patch pyjnius recipe
-        run: |
-          git clone --depth 1 https://github.com/kivy/python-for-android.git /home/runner/p4a-patched
-          python3 -c "import pathlib; p = pathlib.Path('/home/runner/p4a-patched/pythonforandroid/recipes/pyjnius/__init__.py'); s = p.read_text(); p.write_text(s.replace('1.7.0', '1.8.0')); print('patched:', '1.8.0' in p.read_text())"
-
-      - name: Fix buildozer.spec
-        run: |
-          python3 << 'EOF'
-          import re, pathlib
-          p = pathlib.Path('buildozer.spec')
-          s = p.read_text()
-          s = re.sub(r'(?m)^\s*#?\s*android\.arch.*\n', '', s)
-          s = re.sub(r'(?m)^\s*#?\s*p4a\.source_dir.*\n', '', s)
-          s = re.sub(r'(?m)^\s*#?\s*android\.accept_sdk_license.*\n', '', s)
-          s = re.sub(r'(?m)^$$android$$\s*\n', '', s)
-          s = s.replace('[app]', '[app]\nandroid.archs = arm64-v8a\nandroid.accept_sdk_license = True\np4a.source_dir = /home/runner/p4a-patched', 1)
-          p.write_text(s)
-          print(s)
-          EOF
-
-      - name: Use stable debug keystore
-        run: |
-          mkdir -p ~/.android
-          cp debug.keystore ~/.android/debug.keystore
-      - name: Build APK with Buildozer
-        run: |
-          export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
-          buildozer -v android debug
-            
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: apk-package
-          path: bin/*.apk
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        if: success()
-        with:
-          files: bin/*.apk 
-          tag_name: v1.0.${{ github.run_number }}
+- name: Use stable debug keystore
+  run: |
+    mkdir -p ~/.android
+    if [ -f debug.keystore ]; then
+      cp debug.keystore ~/.android/debug.keystore
+    else
+      keytool -genkey -v -keystore ~/.android/debug.keystore \
+        -storepass android -alias androiddebugkey -keypass android \
+        -keyalg RSA -keysize 2048 -validity 10000 \
+        -dname "CN=Android Debug,O=Android,C=US"
+    fi
