@@ -12,6 +12,9 @@ from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
 
+FONT_REGULAR = 'fonts/Montserrat-Regular.ttf'
+FONT_BOLD = 'fonts/Montserrat-Bold.ttf'
+
 ANDROID = False
 try:
     from jnius import autoclass, cast
@@ -86,12 +89,14 @@ class NoteItem(BoxLayout):
         right = BoxLayout(orientation='horizontal', size_hint_x=0.4, spacing=6)
         btn_play = Button(
             text='\u25b6',
+            front_name=FONT_NAME,
             font_size='20sp',
             background_color=(0.12, 0.45, 0.85, 1),
         )
         btn_play.bind(on_release=lambda *a: on_play(self.note))
         btn_share = Button(
             text='\u2197',
+            front_name=FONT_NAME,
             font_size='20sp',
             background_color=(0.95, 0.55, 0.05, 1),
         )
