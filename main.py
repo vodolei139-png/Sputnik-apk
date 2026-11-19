@@ -173,6 +173,7 @@ class DictaphoneApp(App):
 
         header = with_bg(Label(
             text='ДИКТОФОН С ЗАМЕТКАМИ',
+            front_name=FONT_NAME,
             color=(1, 1, 1, 1),
             font_size='22sp',
             bold=True,
@@ -184,6 +185,7 @@ class DictaphoneApp(App):
         self.lbl_status = Label(
             text='Готов к записи',
             color=(0.6, 0.1, 0.1, 1),
+            front_name=FONT_NAME,
             font_size='14sp',
             size_hint_y=None,
             height=30,
@@ -192,6 +194,7 @@ class DictaphoneApp(App):
 
         self.btn_record = Button(
             text='НАЧАТЬ ЗАПИСЬ',
+            front_name=FONT_NAME,
             font_size='20sp',
             bold=True,
             background_color=(0.85, 0.2, 0.2, 1),
