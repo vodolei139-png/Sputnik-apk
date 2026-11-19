@@ -17,7 +17,7 @@ FONT_BOLD = 'fonts/Montserrat-Bold.ttf'
 
 ANDROID = False
 try:
-    from jnius import autoclass, cast
+    from jnius import autoclass, cast, java_method
     from android.permissions import request_permissions, Permission
     ANDROID = True
     MediaRecorder = autoclass('android.media.MediaRecorder')
@@ -29,10 +29,16 @@ try:
     ContentValues = autoclass('android.content.ContentValues')
     MediaStoreAudio = autoclass('android.provider.MediaStore$Audio$Media')
     MediaPlayer = autoclass('android.media.MediaPlayer')
-    Intent = autoclass('android.content.Intent')
+    IntentCls = autoclass('android.content.Intent')
     UriCls = autoclass('android.net.Uri')
     FileCls = autoclass('java.io.File')
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
+
+    class ShareIntent(IntentCls):
+        @java_method('(Ljava/lang/String;Landroid/os/Parcelable;)Landroid/content/Intent;')
+        def putExtra(self, name, value):
+            return super(ShareIntent, self).putExtra(name, value)
+
 except Exception:
     ANDROID = False
 
@@ -354,31 +360,38 @@ class DictaphoneApp(App):
         if not ANDROID:
             self.show_status('Отправка доступна на Android')
             return
+        uri_str = note.get('uri', '')
+        uri_obj = None
+        if uri_str:
+            uri_obj = UriCls.parse(uri_str)
+        else:
+            path = note.get('path', '')
+            if not path or not os.path.exists(path):
+                self.show_status('Файл записи не найден')
+                return
+            uri_obj = UriCls.fromFile(FileCls(path))
         try:
             activity = PythonActivity.mActivity
-            intent = Intent()
-            intent.setAction(Intent.ACTION_SEND)
+            intent = ShareIntent()
+            intent.setAction(IntentCls.ACTION_SEND)
             intent.setType('audio/mp4')
-            uri_str = note.get('uri', '')
-            if uri_str:
-                uri_obj = UriCls.parse(uri_str)
-            else:
-                path = note.get('path', '')
-                if not path or not os.path.exists(path):
-                    self.show_status('Файл записи не найден')
-                    return
-                uri_obj = UriCls.fromFile(FileCls(path))
-            intent.putExtra(
-                Intent.EXTRA_STREAM,
-                cast('android.net.Uri', uri_obj),
-            )
+            intent.putExtra(IntentCls.EXTRA_STREAM, cast('android.os.Parcelable', uri_obj))
             intent.addFlags(1)
-            chooser = Intent.createChooser(intent, 'Отправить запись')
+            chooser = IntentCls.createChooser(intent, 'Отправить запись')
             activity.startActivity(chooser)
             self.show_status('Открываю меню отправки...')
+            return
+        except Exception as e:
+            print('share primary failed:', e)
+        try:
+            activity = PythonActivity.mActivity
+            view_intent = IntentCls(IntentCls.ACTION_VIEW)
+            view_intent.setDataAndType(uri_obj, 'audio/mp4')
+            view_intent.addFlags(1)
+            activity.startActivity(view_intent)
+            self.show_status('Запись открыта через плеер')
         except Exception as e:
             self.show_status('Ошибка отправки: ' + str(e))
-
 
     def load_notes(self):
         self.notes = []
