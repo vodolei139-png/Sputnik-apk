@@ -4,7 +4,7 @@ title = Sputnik
 package.name = sputnik
 package.domain = org.vodolei
 source.dir = .
-source.include_exts = py,png,jpg,kv,txt
+source.include_exts = py,png,jpg,kv,txt,ttf
 version = 1.0
 
 requirements = python3,kivy,pyjnius
