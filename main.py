@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+import os
+import json
+import time
+
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -5,167 +10,271 @@ from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
-from kivy.clock import Clock
-import os
-import json
-import time
+from kivy.graphics import Color, Rectangle
 
-# --- ANDROID IMPORTS (Только то, что реально нужно) ---
+ANDROID = False
 try:
     from jnius import autoclass
     from android.permissions import request_permissions, Permission
-    
-    MediaRecorder = autoclass('android.media.MediaRecorder')
-    MediaRecorder_OutputFormat = autoclass('android.media.MediaRecorder\$OutputFormat')
-    MediaRecorder_AudioSource = autoclass('android.media.MediaRecorder\$AudioSource')
-    MediaRecorder_AudioEncoder = autoclass('android.media.MediaRecorder\$AudioEncoder')
-    Environment = autoclass('android.os.Environment')
-    File = autoclass('java.io.File')
-    PythonActivity = autoclass('org.kivy.android.PythonActivity')
-    
     ANDROID = True
-except ImportError:
+    MediaRecorder = autoclass('android.media.MediaRecorder')
+    AudioSource = autoclass('android.media.MediaRecorder$AudioSource')
+    OutputFormat = autoclass('android.media.MediaRecorder$OutputFormat')
+    AudioEncoder = autoclass('android.media.MediaRecorder$AudioEncoder')
+    Environment = autoclass('android.os.Environment')
+    BuildVersion = autoclass('android.os.Build$VERSION')
+    ContentValues = autoclass('android.content.ContentValues')
+    MediaStoreAudio = autoclass('android.provider.MediaStore$Audio$Media')
+    MediaPlayer = autoclass('android.media.MediaPlayer')
+    Intent = autoclass('android.content.Intent')
+    UriCls = autoclass('android.net.Uri')
+    FileCls = autoclass('java.io.File')
+    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+except Exception:
     ANDROID = False
-    print("Running on Desktop")
 
-# --- КОНФИГУРАЦИЯ ---
-RECORD_FOLDER_NAME = "Sputnik"
-BASE_FOLDER = "Music"
-NOTES_FILE = "notes.json"
+RECORD_DIR = 'Music/Sputnik'
+NOTES_FILE = 'notes.json'
+
+
+def with_bg(widget, rgba):
+    with widget.canvas.before:
+        widget._bg = Color(*rgba)
+        widget._bg_rect = Rectangle(pos=widget.pos, size=widget.size)
+
+    def _sync(instance, value):
+        widget._bg_rect.pos = widget.pos
+        widget._bg_rect.size = widget.size
+
+    widget.bind(pos=_sync, size=_sync)
+    return widget
+
 
 class NoteItem(BoxLayout):
-    def __init__(self, data, on_play, on_share, **kwargs):
-        super().__init__(**kwargs)
-        self.data = data
-        self.on_play = on_play
-        self.on_share = on_share
+    PALETTE = [
+        (1.0, 0.97, 0.6, 1),
+        (0.6, 0.93, 0.87, 1),
+        (1.0, 0.68, 0.6, 1),
+    ]
+
+    def __init__(self, note, index, on_play, on_share, **kwargs):
+        super(NoteItem, self).__init__(**kwargs)
+        self.note = note
         self.orientation = 'horizontal'
-        self.padding = 10
-        self.spacing = 10
+        self.spacing = 8
+        self.padding = (8, 6, 8, 6)
         self.size_hint_y = None
-        self.height = 80
-        
-        # Левая часть: Дата и текст (60%)
-        left_box = BoxLayout(orientation='vertical', size_hint=(0.6, 1))
-        self.lbl_date = Label(text=data.get('date', ''), color=(0, 0, 0, 1), font_size=14, halign='left', valign='top')
-        self.lbl_text = Label(text=data.get('text', 'Без текста'), color=(0, 0, 0, 1), font_size=16, halign='left', valign='top', size_hint_y=None, height=40)
-        self.lbl_text.bind(texture_size=self.lbl_text.setter('size'))
-        left_box.add_widget(self.lbl_date)
-        left_box.add_widget(self.lbl_text)
-        self.add_widget(left_box)
-        
-        # Правая часть: Кнопки (40%)
-        right_box = BoxLayout(orientation='vertical', size_hint=(0.4, 1), spacing=5)
-        
-        btn_play = Button(text="▶ Воспроизвести", size_hint=(1, 0.5), background_color=(0.2, 0.6, 0.2, 1), font_size=14)
-        btn_play.bind(on_press=lambda x: self.on_play(data))
-        
-        btn_share = Button(text="↗ Поделиться", size_hint=(1, 0.5), background_color=(0.2, 0.4, 0.8, 1), font_size=14)
-        btn_share.bind(on_press=lambda x: self.on_share(data))
-        
-        right_box.add_widget(btn_play)
-        right_box.add_widget(btn_share)
-        self.add_widget(right_box)
+        self.height = 70
+        with_bg(self, self.PALETTE[index % len(self.PALETTE)])
+
+        left = BoxLayout(orientation='vertical', size_hint_x=0.6)
+        left.add_widget(Label(
+            text=note.get('date', ''),
+            color=(0.1, 0.1, 0.1, 1),
+            font_size='15sp',
+            bold=True,
+            size_hint_y=None,
+            height=24,
+        ))
+        left.add_widget(Label(
+            text=note.get('text') or '(без текста)',
+            color=(0.15, 0.15, 0.15, 1),
+            font_size='14sp',
+        ))
+        self.add_widget(left)
+
+        right = BoxLayout(orientation='horizontal', size_hint_x=0.4, spacing=6)
+        btn_play = Button(
+            text='\u25b6',
+            font_size='20sp',
+            background_color=(0.12, 0.45, 0.85, 1),
+        )
+        btn_play.bind(on_release=lambda *a: on_play(self.note))
+        btn_share = Button(
+            text='\u2197',
+            font_size='20sp',
+            background_color=(0.95, 0.55, 0.05, 1),
+        )
+        btn_share.bind(on_release=lambda *a: on_share(self.note))
+        right.add_widget(btn_play)
+        right.add_widget(btn_share)
+        self.add_widget(right)
+
+
+def save_to_music(temp_path):
+    filename = 'rec_' + time.strftime('%Y%m%d_%H%M%S') + '.m4a'
+    result = {'path': temp_path, 'uri': '', 'note': None}
+    if not ANDROID:
+        return result
+    sdk = 0
+    try:
+        sdk = int(BuildVersion.SDK_INT)
+    except Exception:
+        sdk = 0
+    if sdk >= 29:
+        try:
+            activity = PythonActivity.mActivity
+            resolver = activity.getContentResolver()
+            values = ContentValues()
+            values.put('title', filename)
+            values.put('mime_type', 'audio/mp4')
+            values.put('relative_path', RECORD_DIR)
+            uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
+            if uri is None:
+                result['note'] = 'MediaStore отказал'
+                return result
+            out_stream = resolver.openOutputStream(uri)
+            with open(temp_path, 'rb') as f:
+                data = f.read()
+            out_stream.write(data)
+            out_stream.close()
+            os.remove(temp_path)
+            result['path'] = ''
+            result['uri'] = str(uri)
+            return result
+        except Exception as e:
+            result['note'] = 'MediaStore: ' + str(e)
+            return result
+    try:
+        base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        folder = os.path.join(str(base), 'Sputnik')
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        target = os.path.join(folder, filename)
+        with open(temp_path, 'rb') as f:
+            data = f.read()
+        with open(target, 'wb') as f:
+            f.write(data)
+        os.remove(temp_path)
+        result['path'] = target
+        return result
+    except Exception as e:
+        result['note'] = 'Копирование: ' + str(e)
+        return result
+
 
 class DictaphoneApp(App):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super(DictaphoneApp, self).__init__(**kwargs)
+        self.notes = []
         self.is_recording = False
         self.recorder = None
-        self.output_file = None
-        self.notes = 
+        self.temp_path = None
         self.load_notes()
-        self.status_text = "Готов к работе"
 
     def build(self):
         Window.clearcolor = (1, 1, 1, 1)
-        root = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        
-        # Шапка
-        header = Label(text="ДИКТОФОН С ЗАМЕТКАМИ", size_hint=(1, 0.1), 
-                       color=(1, 1, 1, 1), font_size=24, bold=True, 
-                       background_color=(0, 0.4, 0.7, 1))
-        header.bind(size=header.setter('text_size'))
+        root = BoxLayout(orientation='vertical', padding=10, spacing=8)
+
+        header = with_bg(Label(
+            text='ДИКТОФОН С ЗАМЕТКАМИ',
+            color=(1, 1, 1, 1),
+            font_size='22sp',
+            bold=True,
+            size_hint_y=None,
+            height=52,
+        ), (0.05, 0.4, 0.75, 1))
         root.add_widget(header)
-        
-        # Статус бар
-        self.lbl_status = Label(text=self.status_text, size_hint=(1, 0.05), 
-                                color=(0.8, 0, 0, 1), font_size=14, halign='center')
-        self.lbl_status.bind(size=self.lbl_status.setter('text_size'))
+
+        self.lbl_status = Label(
+            text='Готов к записи',
+            color=(0.6, 0.1, 0.1, 1),
+            font_size='14sp',
+            size_hint_y=None,
+            height=30,
+        )
         root.add_widget(self.lbl_status)
-        
-        # Кнопка записи
-        self.btn_record = Button(text="НАЧАТЬ ЗАПИСЬ", size_hint=(1, 0.15), 
-                                 font_size=20, bold=True, background_color=(0.8, 0.2, 0.2, 1))
-        self.btn_record.bind(on_press=self.toggle_recording)
+
+        self.btn_record = Button(
+            text='НАЧАТЬ ЗАПИСЬ',
+            font_size='20sp',
+            bold=True,
+            background_color=(0.85, 0.2, 0.2, 1),
+            size_hint_y=None,
+            height=70,
+        )
+        self.btn_record.bind(on_release=self.toggle_recording)
         root.add_widget(self.btn_record)
-        
-        # Путь к файлам
-        path_label = Label(text=f"Записи: Music/{RECORD_FOLDER_NAME}", 
-                           size_hint=(1, 0.05), color=(0.3, 0.3, 0.3, 1), font_size=12)
-        root.add_widget(path_label)
-        
-        # Поле заметки
-        self.txt_note = TextInput(hint_text="Текст заметки", size_hint=(1, 0.08), multiline=True)
+
+        root.add_widget(Label(
+            text='Записи: Music/Sputnik (общедоступная папка)',
+            color=(0.2, 0.35, 0.6, 1),
+            font_size='13sp',
+            size_hint_y=None,
+            height=24,
+        ))
+
+        self.txt_note = TextInput(
+            hint_text='Текст заметки (можно оставить пустым)',
+            multiline=True,
+            size_hint_y=None,
+            height=70,
+        )
         root.add_widget(self.txt_note)
-        
-        # Поиск
-        self.txt_search = TextInput(hint_text="Поиск по заметкам", size_hint=(1, 0.08), multiline=False)
-        self.txt_search.bind(text=self.filter_notes)
+
+        self.txt_search = TextInput(
+            hint_text='Поиск по заметкам',
+            multiline=False,
+            size_hint_y=None,
+            height=48,
+        )
+        self.txt_search.bind(text=self.on_search)
         root.add_widget(self.txt_search)
-        
-        # Список заметок
-        self.list_container = BoxLayout(orientation='vertical', size_hint=(1, 0.5), padding=0)
-        self.scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
-        self.scroll.add_widget(self.list_container)
-        root.add_widget(self.scroll)
-        
+
+        self.list_container = BoxLayout(orientation='vertical', size_hint_y=None, spacing=6)
+        self.list_container.bind(minimum_height=self.list_container.setter('height'))
+        scroll = ScrollView(do_scroll_x=False)
+        scroll.add_widget(self.list_container)
+        root.add_widget(scroll)
+
         self.refresh_notes_ui()
-        
+
         if ANDROID:
-            request_permissions([Permission.RECORD_AUDIO, Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
-            
+            try:
+                request_permissions([
+                    Permission.RECORD_AUDIO,
+                    Permission.WRITE_EXTERNAL_STORAGE,
+                    Permission.READ_EXTERNAL_STORAGE,
+                ])
+            except Exception as e:
+                self.show_status('Разрешения: ' + str(e))
+
         return root
 
-    def toggle_recording(self, instance):
-        if not ANDROID:
-            self.set_status("Ошибка: Запуск только на Android")
-            return
-
-        if not self.is_recording:
-            self.start_recording()
-        else:
+    def toggle_recording(self, *args):
+        if self.is_recording:
             self.stop_recording()
+        else:
+            self.start_recording()
 
     def start_recording(self):
+        if not ANDROID:
+            self.show_status('Запись доступна только на Android')
+            return
         try:
+            if not os.path.isdir(self.user_data_dir):
+                os.makedirs(self.user_data_dir)
+            self.temp_path = os.path.join(self.user_data_dir, 'rec_tmp.m4a')
+            if os.path.exists(self.temp_path):
+                os.remove(self.temp_path)
+            rec = MediaRecorder()
+            rec.setAudioSource(AudioSource.MIC)
+            rec.setOutputFormat(OutputFormat.MPEG_4)
+            rec.setAudioEncoder(AudioEncoder.AAC)
+            rec.setOutputFile(self.temp_path)
+            rec.prepare()
+            rec.start()
+            self.recorder = rec
             self.is_recording = True
-            self.btn_record.text = "ОСТАНОВИТЬ ЗАПИСЬ"
-            self.btn_record.background_color = (0.8, 0.5, 0.2, 1)
-            self.set_status("Идёт запись...")
-            
-            # 1. Получаем путь к папке Music/Sputnik
-            external_dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-            target_folder = File(external_dir, RECORD_FOLDER_NAME)
-            if not target_folder.exists():
-                target_folder.mkdirs()
-            
-            filename = f"rec_{int(time.time())}.m4a"
-            self.output_file = File(target_folder, filename)
-            
-            # 2. Инициализируем MediaRecorder
-            self.recorder = MediaRecorder()
-            self.recorder.setAudioSource(MediaRecorder_AudioSource.MIC)
-            self.recorder.setOutputFormat(MediaRecorder_OutputFormat.MPEG_4)
-            self.recorder.setAudioEncoder(MediaRecorder_AudioEncoder.AAC)
-            self.recorder.setOutputFile(self.output_file.getAbsolutePath())
-            self.recorder.prepare()
-            self.recorder.start()
-            
+            self.btn_record.text = 'ОСТАНОВИТЬ'
+            self.btn_record.background_color = (0.1, 0.6, 0.3, 1)
+            self.show_status('Идёт запись...')
         except Exception as e:
             self.is_recording = False
-            self.reset_button_state()
-            self.set_status(f"Ошибка записи: {str(e)}")
+            self.recorder = None
+            self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
+            self.btn_record.background_color = (0.85, 0.2, 0.2, 1)
+            self.show_status('Ошибка записи: ' + str(e))
 
     def stop_recording(self):
         try:
@@ -173,79 +282,138 @@ class DictaphoneApp(App):
                 self.recorder.stop()
                 self.recorder.release()
                 self.recorder = None
-            
-            # Сохраняем заметку
-            note_text = self.txt_note.text.strip()
-            current_time = time.strftime("%d.%m.%Y %H:%M")
-            
-            new_note = {
-                "text": note_text if note_text else "(без текста)",
-                "date": current_time,
-                "file_path": self.output_file.getAbsolutePath() if self.output_file else ""
-            }
-            self.notes.append(new_note)
-            self.save_notes()
-            
             self.is_recording = False
-            self.reset_button_state()
-            self.txt_note.text = ""
-            self.set_status("Запись сохранена в Music/Sputnik")
-            self.refresh_notes_ui()
-            
+            self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
+            self.btn_record.background_color = (0.85, 0.2, 0.2, 1)
+            self.publish_record()
         except Exception as e:
             self.is_recording = False
-            self.reset_button_state()
-            self.set_status(f"Ошибка сохранения: {str(e)}")
+            self.recorder = None
+            self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
+            self.btn_record.background_color = (0.85, 0.2, 0.2, 1)
+            self.show_status('Ошибка остановки: ' + str(e))
 
-    def reset_button_state(self):
-        self.btn_record.text = "НАЧАТЬ ЗАПИСЬ"
-        self.btn_record.background_color = (0.8, 0.2, 0.2, 1)
+    def publish_record(self):
+        temp_path = self.temp_path
+        if not temp_path or not os.path.exists(temp_path):
+            self.show_status('Файл записи не найден')
+            return
+        note = {
+            'text': self.txt_note.text.strip() or '(без текста)',
+            'date': time.strftime('%d.%m.%Y %H:%M'),
+            'path': '',
+            'uri': '',
+        }
+        result = save_to_music(temp_path)
+        note['path'] = result['path']
+        note['uri'] = result['uri']
+        if result['note']:
+            note['note'] = result['note']
+        self.notes.append(note)
+        self.save_notes()
+        self.txt_note.text = ''
+        self.temp_path = None
+        self.refresh_notes_ui()
+        if result['note']:
+            self.show_status('Запись сохранена во внутреннюю папку. Причина: ' + result['note'])
+        elif result['uri']:
+            self.show_status('Запись сохранена (Music/Sputnik)')
+        else:
+            self.show_status('Запись сохранена в Music/Sputnik')
+
+    def play_note(self, note):
+        if not ANDROID:
+            self.show_status('Воспроизведение доступно на Android')
+            return
+        try:
+            uri = note.get('uri', '')
+            player = MediaPlayer()
+            if uri:
+                player.setDataSource(PythonActivity.mActivity, UriCls.parse(uri))
+            else:
+                path = note.get('path', '')
+                if not path or not os.path.exists(path):
+                    self.show_status('Файл записи не найден')
+                    return
+                player.setDataSource(path)
+            player.prepare()
+            player.start()
+            self.show_status('Воспроизведение...')
+        except Exception as e:
+            self.show_status('Ошибка воспроизведения: ' + str(e))
+
+    def share_note(self, note):
+        if not ANDROID:
+            self.show_status('Отправка доступна на Android')
+            return
+        try:
+            activity = PythonActivity.mActivity
+            intent = Intent()
+            intent.setAction(Intent.ACTION_SEND)
+            intent.setType('audio/mp4')
+            uri = note.get('uri', '')
+            if uri:
+                intent.putExtra(Intent.EXTRA_STREAM, UriCls.parse(uri))
+            else:
+                path = note.get('path', '')
+                if not path or not os.path.exists(path):
+                    self.show_status('Файл записи не найден')
+                    return
+                intent.putExtra(Intent.EXTRA_STREAM, UriCls.fromFile(FileCls(path)))
+            intent.addFlags(1)
+            chooser = Intent.createChooser(intent, 'Отправить запись')
+            activity.startActivity(chooser)
+            self.show_status('Открываю меню отправки...')
+        except Exception as e:
+            self.show_status('Ошибка отправки: ' + str(e))
 
     def load_notes(self):
+        self.notes = []
         try:
-            app_path = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
-            path = os.path.join(app_path, NOTES_FILE)
+            path = os.path.join(self.user_data_dir, NOTES_FILE)
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
-                    self.notes = json.load(f)
-        except:
-            self.notes = 
+                    data = json.load(f)
+                if isinstance(data, list):
+                    self.notes = data
+        except Exception as e:
+            print('load_notes error:', e)
 
     def save_notes(self):
         try:
-            app_path = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
-            path = os.path.join(app_path, NOTES_FILE)
+            if not os.path.isdir(self.user_data_dir):
+                os.makedirs(self.user_data_dir)
+            path = os.path.join(self.user_data_dir, NOTES_FILE)
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(self.notes, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"Save error: {e}")
+            print('save_notes error:', e)
 
-    def refresh_notes_ui(self):
+    def on_search(self, instance, value):
+        self.refresh_notes_ui(search=value.strip().lower())
+
+    def refresh_notes_ui(self, search=''):
         self.list_container.clear_widgets()
-        
-        if not self.notes:
-            lbl = Label(text="Заметок пока нет — нажмите красную кнопку", color=(0.5, 0.5, 0.5, 1), size_hint_y=None, height=40)
-            self.list_container.add_widget(lbl)
+        notes = self.notes
+        if search:
+            notes = [n for n in notes if search in (n.get('text') or '').lower()]
+        if not notes:
+            self.list_container.add_widget(Label(
+                text='Заметок пока нет — нажмите красную кнопку',
+                color=(0.45, 0.45, 0.45, 1),
+                size_hint_y=None,
+                height=40,
+            ))
             return
+        for index, note in enumerate(notes):
+            self.list_container.add_widget(
+                NoteItem(note, index, self.play_note, self.share_note)
+            )
 
-        for note in self.notes:
-            item = NoteItem(note, self.play_audio, self.share_audio)
-            self.list_container.add_widget(item)
-
-    def filter_notes(self, instance, value):
-        # Упрощенная фильтрация (можно доработать)
-        self.refresh_notes_ui()
-
-    def play_audio(self, note):
-        self.set_status("Для воспроизведения откройте файл в плеере")
-
-    def share_audio(self, note):
-        self.set_status("Функция шаринга в разработке")
-
-    def set_status(self, text):
-        self.status_text = text
+    def show_status(self, text):
         self.lbl_status.text = text
-        print(f"[STATUS] {text}")
+        print('[STATUS]', text)
+
 
 if __name__ == '__main__':
     DictaphoneApp().run()
