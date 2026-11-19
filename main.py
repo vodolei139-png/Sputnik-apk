@@ -14,7 +14,7 @@ from kivy.graphics import Color, Rectangle
 
 ANDROID = False
 try:
-    from jnius import autoclass
+    from jnius import autoclass, cast
     from android.permissions import request_permissions, Permission
     ANDROID = True
     MediaRecorder = autoclass('android.media.MediaRecorder')
@@ -121,7 +121,7 @@ def save_to_music(temp_path):
             values.put('relative_path', RECORD_DIR)
             uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
             if uri is None:
-                result['note'] = 'MediaStore отказал'
+                result['note'] = 'MediaStore refused'
                 return result
             out_stream = resolver.openOutputStream(uri)
             with open(temp_path, 'rb') as f:
@@ -149,7 +149,7 @@ def save_to_music(temp_path):
         result['path'] = target
         return result
     except Exception as e:
-        result['note'] = 'Копирование: ' + str(e)
+        result['note'] = 'Copy: ' + str(e)
         return result
 
 
@@ -315,21 +315,19 @@ class DictaphoneApp(App):
         self.temp_path = None
         self.refresh_notes_ui()
         if result['note']:
-            self.show_status('Запись сохранена во внутреннюю папку. Причина: ' + result['note'])
-        elif result['uri']:
-            self.show_status('Запись сохранена (Music/Sputnik)')
+            self.show_status('Запись во внутренней папке. Причина: ' + result['note'])
         else:
-            self.show_status('Запись сохранена в Music/Sputnik')
+            self.show_status('Запись сохранена (Music/Sputnik)')
 
     def play_note(self, note):
         if not ANDROID:
             self.show_status('Воспроизведение доступно на Android')
             return
         try:
-            uri = note.get('uri', '')
             player = MediaPlayer()
-            if uri:
-                player.setDataSource(PythonActivity.mActivity, UriCls.parse(uri))
+            uri_str = note.get('uri', '')
+            if uri_str:
+                player.setDataSource(PythonActivity.mActivity, UriCls.parse(uri_str))
             else:
                 path = note.get('path', '')
                 if not path or not os.path.exists(path):
@@ -351,15 +349,19 @@ class DictaphoneApp(App):
             intent = Intent()
             intent.setAction(Intent.ACTION_SEND)
             intent.setType('audio/mp4')
-            uri = note.get('uri', '')
-            if uri:
-                intent.putExtra(Intent.EXTRA_STREAM, UriCls.parse(uri))
+            uri_str = note.get('uri', '')
+            if uri_str:
+                uri_obj = UriCls.parse(uri_str)
             else:
                 path = note.get('path', '')
                 if not path or not os.path.exists(path):
                     self.show_status('Файл записи не найден')
                     return
-                intent.putExtra(Intent.EXTRA_STREAM, UriCls.fromFile(FileCls(path)))
+                uri_obj = UriCls.fromFile(FileCls(path))
+            intent.putExtra(
+                cast('java.lang.String', Intent.EXTRA_STREAM),
+                cast('android.os.Parcelable', uri_obj),
+            )
             intent.addFlags(1)
             chooser = Intent.createChooser(intent, 'Отправить запись')
             activity.startActivity(chooser)
