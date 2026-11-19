@@ -369,8 +369,8 @@ class DictaphoneApp(App):
                     return
                 uri_obj = UriCls.fromFile(FileCls(path))
             intent.putExtra(
-                cast('java.lang.String', Intent.EXTRA_STREAM),
-                cast('android.os.Parcelable', uri_obj),
+                Intent.EXTRA_STREAM,
+                cast('android.net.Uri', uri_obj),
             )
             intent.addFlags(1)
             chooser = Intent.createChooser(intent, 'Отправить запись')
@@ -378,6 +378,7 @@ class DictaphoneApp(App):
             self.show_status('Открываю меню отправки...')
         except Exception as e:
             self.show_status('Ошибка отправки: ' + str(e))
+
 
     def load_notes(self):
         self.notes = []
