@@ -73,14 +73,15 @@ class NoteItem(BoxLayout):
         left = BoxLayout(orientation='vertical', size_hint_x=0.6)
         left.add_widget(Label(
             text=note.get('date', ''),
+            font_name=FONT_BOLD,
             color=(0.1, 0.1, 0.1, 1),
             font_size='15sp',
-            bold=True,
             size_hint_y=None,
             height=24,
         ))
         left.add_widget(Label(
             text=note.get('text') or '(без текста)',
+            font_name=FONT_REGULAR,
             color=(0.15, 0.15, 0.15, 1),
             font_size='14sp',
         ))
@@ -88,16 +89,16 @@ class NoteItem(BoxLayout):
 
         right = BoxLayout(orientation='horizontal', size_hint_x=0.4, spacing=6)
         btn_play = Button(
-            text='\u25b6',
-            front_name=FONT_NAME,
-            font_size='20sp',
+            text='СЛУШАТЬ',
+            font_name=FONT_REGULAR,
+            font_size='13sp',
             background_color=(0.12, 0.45, 0.85, 1),
         )
         btn_play.bind(on_release=lambda *a: on_play(self.note))
         btn_share = Button(
-            text='\u2197',
-            front_name=FONT_NAME,
-            font_size='20sp',
+            text='ОТПРАВИТЬ',
+            font_name=FONT_REGULAR,
+            font_size='13sp',
             background_color=(0.95, 0.55, 0.05, 1),
         )
         btn_share.bind(on_release=lambda *a: on_share(self.note))
@@ -173,10 +174,9 @@ class DictaphoneApp(App):
 
         header = with_bg(Label(
             text='ДИКТОФОН С ЗАМЕТКАМИ',
-            front_name=FONT_NAME,
+            font_name=FONT_BOLD,
             color=(1, 1, 1, 1),
             font_size='22sp',
-            bold=True,
             size_hint_y=None,
             height=52,
         ), (0.05, 0.4, 0.75, 1))
@@ -184,8 +184,8 @@ class DictaphoneApp(App):
 
         self.lbl_status = Label(
             text='Готов к записи',
+            font_name=FONT_REGULAR,
             color=(0.6, 0.1, 0.1, 1),
-            front_name=FONT_NAME,
             font_size='14sp',
             size_hint_y=None,
             height=30,
@@ -194,9 +194,8 @@ class DictaphoneApp(App):
 
         self.btn_record = Button(
             text='НАЧАТЬ ЗАПИСЬ',
-            front_name=FONT_NAME,
+            font_name=FONT_BOLD,
             font_size='20sp',
-            bold=True,
             background_color=(0.85, 0.2, 0.2, 1),
             size_hint_y=None,
             height=70,
@@ -206,6 +205,7 @@ class DictaphoneApp(App):
 
         root.add_widget(Label(
             text='Записи: Music/Sputnik (общедоступная папка)',
+            font_name=FONT_REGULAR,
             color=(0.2, 0.35, 0.6, 1),
             font_size='13sp',
             size_hint_y=None,
@@ -214,6 +214,7 @@ class DictaphoneApp(App):
 
         self.txt_note = TextInput(
             hint_text='Текст заметки (можно оставить пустым)',
+            font_name=FONT_REGULAR,
             multiline=True,
             size_hint_y=None,
             height=70,
@@ -222,6 +223,7 @@ class DictaphoneApp(App):
 
         self.txt_search = TextInput(
             hint_text='Поиск по заметкам',
+            font_name=FONT_REGULAR,
             multiline=False,
             size_hint_y=None,
             height=48,
@@ -410,6 +412,7 @@ class DictaphoneApp(App):
         if not notes:
             self.list_container.add_widget(Label(
                 text='Заметок пока нет — нажмите красную кнопку',
+                font_name=FONT_REGULAR,
                 color=(0.45, 0.45, 0.45, 1),
                 size_hint_y=None,
                 height=40,
