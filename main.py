@@ -68,7 +68,7 @@ class NoteItem(BoxLayout):
         self.spacing = 8
         self.padding = (8, 6, 8, 6)
         self.size_hint_y = None
-        self.height = 70
+        self.height = 56
         with_bg(self, self.PALETTE[index % len(self.PALETTE)])
 
         left = BoxLayout(orientation='vertical', size_hint_x=0.6)
@@ -88,18 +88,18 @@ class NoteItem(BoxLayout):
         ))
         self.add_widget(left)
 
-        right = BoxLayout(orientation='horizontal', size_hint_x=0.4, spacing=6)
+        r        right = BoxLayout(orientation='horizontal', size_hint_x=0.32, spacing=4)
         btn_play = Button(
             text='СЛУШАТЬ',
             font_name=FONT_REGULAR,
-            font_size='13sp',
+            font_size='11sp',
             background_color=(0.12, 0.45, 0.85, 1),
         )
         btn_play.bind(on_release=lambda *a: on_play(self.note))
         btn_share = Button(
             text='ОТПРАВИТЬ',
             font_name=FONT_REGULAR,
-            font_size='13sp',
+            font_size='11sp',
             background_color=(0.95, 0.55, 0.05, 1),
         )
         btn_share.bind(on_release=lambda *a: on_share(self.note))
@@ -358,7 +358,7 @@ class DictaphoneApp(App):
         except Exception as e:
             self.show_status('Ошибка воспроизведения: ' + str(e))
 
-    def share_note(self, note):
+        def share_note(self, note):
         if not ANDROID:
             self.show_status('Отправка доступна на Android')
             return
@@ -371,28 +371,35 @@ class DictaphoneApp(App):
                 self.show_status('Файл записи не найден')
                 return
             uri_obj = UriCls.fromFile(FileCls(path))
+        activity = PythonActivity.mActivity
+        errors = []
+        for attempt in ('cast', 'plain'):
+            try:
+                intent = IntentCls()
+                intent.setAction(IntentCls.ACTION_SEND)
+                intent.setType('audio/mp4')
+                if attempt == 'cast':
+                    intent.putExtra(IntentCls.EXTRA_STREAM,
+                                    cast('android.os.Parcelable', uri_obj))
+                else:
+                    intent.putExtra(IntentCls.EXTRA_STREAM, uri_obj)
+                intent.addFlags(1)
+                chooser = IntentCls.createChooser(intent, 'Отправить запись')
+                activity.startActivity(chooser)
+                self.show_status('Открываю меню отправки...')
+                return
+            except Exception as e:
+                errors.append(attempt + ': ' + str(e))
+        print('share failed:', errors)
         try:
-            activity = PythonActivity.mActivity
-            intent = IntentCls()
-            intent.setAction(IntentCls.ACTION_SEND)
-            intent.setType('audio/mp4')
-            intent.putExtra(IntentCls.EXTRA_STREAM, cast('android.os.Parcelable', uri_obj))
-            intent.addFlags(1)
-            chooser = IntentCls.createChooser(intent, 'Отправить запись')
-            activity.startActivity(chooser)
-            self.show_status('Открываю меню отправки...')
-            return
-        except Exception as e:
-            print('share primary failed:', e)
-        try:
-            activity = PythonActivity.mActivity
             view_intent = IntentCls(IntentCls.ACTION_VIEW)
             view_intent.setDataAndType(uri_obj, 'audio/mp4')
             view_intent.addFlags(1)
             activity.startActivity(view_intent)
-            self.show_status('Запись открыта через плеер')
-        except Exception as e:
-            self.show_status('Ошибка отправки: ' + str(e))
+            self.show_status('Меню не открылось (' + errors[0] + '). Открыто через плеер')
+        except Exception:
+            self.show_status('Ошибка отправки: ' + errors[0])
+
 
     def load_notes(self):
         self.notes = []
