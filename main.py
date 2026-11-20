@@ -16,8 +16,9 @@ FONT_REGULAR = 'fonts/Montserrat-Regular.ttf'
 FONT_BOLD = 'fonts/Montserrat-Bold.ttf'
 
 ANDROID = False
+ANDROID_ERR = ''
 try:
-    from jnius import autoclass, cast, java_method
+    from jnius import autoclass, cast
     from android.permissions import request_permissions, Permission
     ANDROID = True
     MediaRecorder = autoclass('android.media.MediaRecorder')
@@ -33,12 +34,6 @@ try:
     UriCls = autoclass('android.net.Uri')
     FileCls = autoclass('java.io.File')
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
-
-    class ShareIntent(IntentCls):
-        @java_method('(Ljava/lang/String;Landroid/os/Parcelable;)Landroid/content/Intent;')
-        def putExtra(self, name, value):
-            return super(ShareIntent, self).putExtra(name, value)
-
 except Exception:
     ANDROID = False
 
@@ -117,6 +112,7 @@ def save_to_music(temp_path):
     filename = 'rec_' + time.strftime('%Y%m%d_%H%M%S') + '.m4a'
     result = {'path': temp_path, 'uri': '', 'note': None}
     if not ANDROID:
+        result['note'] = 'no android modules'
         return result
     sdk = 0
     try:
@@ -198,6 +194,9 @@ class DictaphoneApp(App):
         )
         root.add_widget(self.lbl_status)
 
+        if not ANDROID and ANDROID_ERR:
+            self.show_status('Сборка без Android-модулей. Причина: ' + ANDROID_ERR)
+
         self.btn_record = Button(
             text='НАЧАТЬ ЗАПИСЬ',
             font_name=FONT_BOLD,
@@ -265,7 +264,10 @@ class DictaphoneApp(App):
 
     def start_recording(self):
         if not ANDROID:
-            self.show_status('Запись доступна только на Android')
+            if ANDROID_ERR:
+                self.show_status('Android-модули не загрузились: ' + ANDROID_ERR)
+            else:
+                self.show_status('Запись доступна только на Android')
             return
         try:
             if not os.path.isdir(self.user_data_dir):
@@ -361,7 +363,6 @@ class DictaphoneApp(App):
             self.show_status('Отправка доступна на Android')
             return
         uri_str = note.get('uri', '')
-        uri_obj = None
         if uri_str:
             uri_obj = UriCls.parse(uri_str)
         else:
@@ -372,7 +373,7 @@ class DictaphoneApp(App):
             uri_obj = UriCls.fromFile(FileCls(path))
         try:
             activity = PythonActivity.mActivity
-            intent = ShareIntent()
+            intent = IntentCls()
             intent.setAction(IntentCls.ACTION_SEND)
             intent.setType('audio/mp4')
             intent.putExtra(IntentCls.EXTRA_STREAM, cast('android.os.Parcelable', uri_obj))
