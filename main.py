@@ -4,6 +4,7 @@ import json
 import time
 
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -31,6 +32,7 @@ try:
     MediaStoreAudio = autoclass('android.provider.MediaStore$Audio$Media')
     MediaPlayer = autoclass('android.media.MediaPlayer')
     IntentCls = autoclass('android.content.Intent')
+    ClipDataCls = autoclass('android.content.ClipData')
     UriCls = autoclass('android.net.Uri')
     FileCls = autoclass('java.io.File')
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -65,18 +67,18 @@ class NoteItem(BoxLayout):
         super(NoteItem, self).__init__(**kwargs)
         self.note = note
         self.orientation = 'horizontal'
-        self.spacing = 8
-        self.padding = (8, 6, 8, 6)
+        self.spacing = 6
+        self.padding = (6, 5, 6, 5)
         self.size_hint_y = None
-        self.height = 56
+        self.height = 60
         with_bg(self, self.PALETTE[index % len(self.PALETTE)])
 
-        left = BoxLayout(orientation='vertical', size_hint_x=0.68)
+        left = BoxLayout(orientation='vertical', size_hint_x=0.58)
         left.add_widget(Label(
             text=note.get('date', ''),
             font_name=FONT_BOLD,
             color=(0.1, 0.1, 0.1, 1),
-            font_size='14sp',
+            font_size='13sp',
             size_hint_y=None,
             height=22,
         ))
@@ -84,22 +86,22 @@ class NoteItem(BoxLayout):
             text=note.get('text') or '(без текста)',
             font_name=FONT_REGULAR,
             color=(0.15, 0.15, 0.15, 1),
-            font_size='13sp',
+            font_size='12sp',
         ))
         self.add_widget(left)
 
-        right = BoxLayout(orientation='horizontal', size_hint_x=0.32, spacing=4)
+        right = BoxLayout(orientation='horizontal', size_hint_x=0.42, spacing=4)
         btn_play = Button(
             text='СЛУШАТЬ',
             font_name=FONT_REGULAR,
-            font_size='11sp',
+            font_size='10sp',
             background_color=(0.12, 0.45, 0.85, 1),
         )
         btn_play.bind(on_release=lambda *a: on_play(self.note))
         btn_share = Button(
             text='ОТПРАВИТЬ',
             font_name=FONT_REGULAR,
-            font_size='11sp',
+            font_size='10sp',
             background_color=(0.95, 0.55, 0.05, 1),
         )
         btn_share.bind(on_release=lambda *a: on_share(self.note))
@@ -168,6 +170,8 @@ class DictaphoneApp(App):
         self.is_recording = False
         self.recorder = None
         self.temp_path = None
+        self.rec_start = 0.0
+        self.timer_event = None
         self.load_notes()
 
     def build(self):
@@ -188,14 +192,21 @@ class DictaphoneApp(App):
             text='Готов к записи',
             font_name=FONT_REGULAR,
             color=(0.6, 0.1, 0.1, 1),
-            font_size='14sp',
+            font_size='13sp',
+            halign='left',
+            valign='middle',
             size_hint_y=None,
-            height=30,
+            height=46,
         )
+
+        def _sync_status(inst, w):
+            inst.text_size = (w, None)
+
+        self.lbl_status.bind(width=_sync_status)
         root.add_widget(self.lbl_status)
 
         if not ANDROID and ANDROID_ERR:
-            self.show_status('Сборка без Android-модулей. Причина: ' + ANDROID_ERR)
+            self.show_status('Сборка без Android-модулей: ' + ANDROID_ERR)
 
         self.btn_record = Button(
             text='НАЧАТЬ ЗАПИСЬ',
@@ -256,6 +267,15 @@ class DictaphoneApp(App):
 
         return root
 
+    def stop_timer(self):
+        if self.timer_event:
+            self.timer_event.cancel()
+            self.timer_event = None
+
+    def tick_timer(self, dt):
+        elapsed = int(time.time() - self.rec_start)
+        self.lbl_status.text = 'Идёт запись: {:02d}:{:02d}'.format(elapsed // 60, elapsed % 60)
+
     def toggle_recording(self, *args):
         if self.is_recording:
             self.stop_recording()
@@ -284,10 +304,13 @@ class DictaphoneApp(App):
             rec.start()
             self.recorder = rec
             self.is_recording = True
+            self.rec_start = time.time()
             self.btn_record.text = 'ОСТАНОВИТЬ'
             self.btn_record.background_color = (0.1, 0.6, 0.3, 1)
-            self.show_status('Идёт запись...')
+            self.tick_timer(0)
+            self.timer_event = Clock.schedule_interval(self.tick_timer, 1)
         except Exception as e:
+            self.stop_timer()
             self.is_recording = False
             self.recorder = None
             self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
@@ -300,11 +323,13 @@ class DictaphoneApp(App):
                 self.recorder.stop()
                 self.recorder.release()
                 self.recorder = None
+            self.stop_timer()
             self.is_recording = False
             self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
             self.btn_record.background_color = (0.85, 0.2, 0.2, 1)
             self.publish_record()
         except Exception as e:
+            self.stop_timer()
             self.is_recording = False
             self.recorder = None
             self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
@@ -333,7 +358,7 @@ class DictaphoneApp(App):
         self.temp_path = None
         self.refresh_notes_ui()
         if result['note']:
-            self.show_status('Запись во внутренней папке. Причина: ' + result['note'])
+            self.show_status('Запись во внутренней папке: ' + result['note'])
         else:
             self.show_status('Запись сохранена (Music/Sputnik)')
 
@@ -373,32 +398,39 @@ class DictaphoneApp(App):
             uri_obj = UriCls.fromFile(FileCls(path))
         activity = PythonActivity.mActivity
         errors = []
-        for attempt in ('cast', 'plain'):
+
+        def make_stream_intent(extra_filler):
+            intent = IntentCls()
+            intent.setAction(IntentCls.ACTION_SEND)
+            intent.setType('audio/mp4')
+            extra_filler(intent)
+            intent.addFlags(1)
+            return IntentCls.createChooser(intent, 'Отправить запись')
+
+        attempts = [
+            ('putExtra Parcelable',
+             lambda i: i.putExtra(IntentCls.EXTRA_STREAM, cast('android.os.Parcelable', uri_obj))),
+            ('putExtra Uri',
+             lambda i: i.putExtra(IntentCls.EXTRA_STREAM, cast('android.net.Uri', uri_obj))),
+            ('ClipData',
+             lambda i: i.setClipData(ClipDataCls.newUri(activity.getContentResolver(), 'запись', uri_obj))),
+        ]
+        for name, filler in attempts:
             try:
-                intent = IntentCls()
-                intent.setAction(IntentCls.ACTION_SEND)
-                intent.setType('audio/mp4')
-                if attempt == 'cast':
-                    intent.putExtra(IntentCls.EXTRA_STREAM,
-                                    cast('android.os.Parcelable', uri_obj))
-                else:
-                    intent.putExtra(IntentCls.EXTRA_STREAM, uri_obj)
-                intent.addFlags(1)
-                chooser = IntentCls.createChooser(intent, 'Отправить запись')
-                activity.startActivity(chooser)
+                activity.startActivity(make_stream_intent(filler))
                 self.show_status('Открываю меню отправки...')
                 return
             except Exception as e:
-                errors.append(attempt + ': ' + str(e))
-        print('share failed:', errors)
+                errors.append(name + ': ' + str(e)[:100])
+        print('share errors:', errors)
         try:
             view_intent = IntentCls(IntentCls.ACTION_VIEW)
             view_intent.setDataAndType(uri_obj, 'audio/mp4')
             view_intent.addFlags(1)
             activity.startActivity(view_intent)
-            self.show_status('Меню не открылось (' + errors[0] + '). Открыто через плеер')
+            self.show_status('Меню не открылось — запись в плеере')
         except Exception:
-            self.show_status('Ошибка отправки: ' + errors[0])
+            self.show_status('Не удалось открыть запись')
 
     def load_notes(self):
         self.notes = []
