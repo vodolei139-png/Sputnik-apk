@@ -71,7 +71,7 @@ class NoteItem(BoxLayout):
         self.spacing = 4
         self.padding = (6, 5, 6, 5)
         self.size_hint_y = None
-        self.height = 60
+        self.height = 78
         with_bg(self, self.PALETTE[index % len(self.PALETTE)])
 
         left = BoxLayout(orientation='vertical', size_hint_x=0.48)
@@ -83,12 +83,16 @@ class NoteItem(BoxLayout):
             size_hint_y=None,
             height=22,
         ))
-        left.add_widget(Label(
+        lbl_text = Label(
             text=note.get('text') or '(без текста)',
             font_name=FONT_REGULAR,
             color=(0.15, 0.15, 0.15, 1),
             font_size='12sp',
-        ))
+            halign='left',
+            valign='middle',
+        )
+        lbl_text.bind(width=lambda inst, w: setattr(inst, 'text_size', (w, None)))
+        left.add_widget(lbl_text)
         self.add_widget(left)
 
         right = BoxLayout(orientation='horizontal', size_hint_x=0.52, spacing=3)
@@ -112,7 +116,7 @@ class NoteItem(BoxLayout):
             font_size='9sp',
             background_color=(0.7, 0.15, 0.15, 1),
         )
-        btn_delete.bind(on_release=lambda *a: on_delete_tap(self, note))
+        btn_delete.bind(on_release=lambda *a: self._delete_tap(on_delete))
         right.add_widget(btn_play)
         right.add_widget(btn_share)
         right.add_widget(btn_delete)
@@ -120,15 +124,15 @@ class NoteItem(BoxLayout):
 
         self.btn_delete = btn_delete
 
-        def on_delete_tap(item, note):
-            if not item._armed:
-                item._armed = True
-                item.btn_delete.text = 'ТОЧНО?'
-                item.btn_delete.background_color = (0.45, 0.05, 0.05, 1)
-                Clock.schedule_once(item._disarm, 3)
-            else:
-                item._armed = False
-                on_delete(note)
+    def _delete_tap(self, on_delete):
+        if not self._armed:
+            self._armed = True
+            self.btn_delete.text = 'ТОЧНО?'
+            self.btn_delete.background_color = (0.45, 0.05, 0.05, 1)
+            Clock.schedule_once(self._disarm, 3)
+        else:
+            self._armed = False
+            on_delete(self.note)
 
     def _disarm(self, dt):
         self._armed = False
@@ -138,21 +142,20 @@ class NoteItem(BoxLayout):
 
 def save_to_music(temp_path):
     filename = 'rec_' + time.strftime('%Y%m%d_%H%M%S') + '.m4a'
-    result = {'path': temp_path, 'uri': '', 'note': None}
+    result = {'path': '', 'uri': '', 'note': None}
     if not ANDROID:
+        result['path'] = temp_path
         result['note'] = 'no android modules'
         return result
 
-    def keep_temp():
-        try:
-            if os.path.exists(temp_path):
-                kept = os.path.join(
-                    os.path.dirname(temp_path),
-                    'rec_' + time.strftime('%Y%m%d_%H%M%S') + '_keep.m4a')
-                os.rename(temp_path, kept)
-                result['path'] = kept
-        except Exception:
-            result['path'] = temp_path
+    private_path = os.path.join(
+        os.path.dirname(temp_path),
+        filename.replace('.m4a', '_p.m4a'))
+    try:
+        os.rename(temp_path, private_path)
+    except Exception:
+        private_path = temp_path
+    result['path'] = private_path
 
     sdk = 0
     try:
@@ -169,11 +172,10 @@ def save_to_music(temp_path):
             values.put('relative_path', RECORD_DIR)
             uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
             if uri is None:
-                keep_temp()
                 result['note'] = 'MediaStore refused'
                 return result
             out_stream = resolver.openOutputStream(uri)
-            with open(temp_path, 'rb') as f:
+            with open(private_path, 'rb') as f:
                 data = f.read()
             out_stream.write(data)
             out_stream.close()
@@ -183,24 +185,9 @@ def save_to_music(temp_path):
                 resolver.update(uri, up, None, None)
             except Exception as e:
                 print('pending update failed:', e)
-            check_ok = False
-            try:
-                src = resolver.openInputStream(uri)
-                src.read()
-                src.close()
-                check_ok = True
-            except Exception as e:
-                print('readback failed:', e)
-            if not check_ok:
-                keep_temp()
-                result['note'] = 'файл не читается из MediaStore'
-                return result
-            os.remove(temp_path)
-            result['path'] = ''
             result['uri'] = str(uri)
             return result
         except Exception as e:
-            keep_temp()
             result['note'] = 'MediaStore: ' + str(e)[:120]
             return result
     try:
@@ -209,15 +196,13 @@ def save_to_music(temp_path):
         if not os.path.isdir(folder):
             os.makedirs(folder)
         target = os.path.join(folder, filename)
-        with open(temp_path, 'rb') as f:
+        with open(private_path, 'rb') as f:
             data = f.read()
         with open(target, 'wb') as f:
             f.write(data)
-        os.remove(temp_path)
         result['path'] = target
         return result
     except Exception as e:
-        keep_temp()
         result['note'] = 'Copy: ' + str(e)[:120]
         return result
 
@@ -328,7 +313,7 @@ class DictaphoneApp(App):
 
     def delete_note(self, note):
         uri_str = note.get('uri', '')
-        if uri_str and ANDROID:
+        if uri_str and uri_str != 'None' and ANDROID:
             try:
                 resolver = PythonActivity.mActivity.getContentResolver()
                 resolver.delete(UriCls.parse(uri_str), None, None)
@@ -437,7 +422,7 @@ class DictaphoneApp(App):
         self.temp_path = None
         self.refresh_notes_ui()
         if result['note']:
-            self.show_status('Сохранено во внутренней папке: ' + result['note'])
+            self.show_status('Сохранено только внутри приложения: ' + result['note'])
         else:
             self.show_status('Запись сохранена (Music/Sputnik)')
 
@@ -449,8 +434,21 @@ class DictaphoneApp(App):
         path = note.get('path', '')
         errors = []
 
+        def try_path():
+            if not path or not os.path.exists(path):
+                return None
+            try:
+                p = MediaPlayer()
+                p.setDataSource(path)
+                p.prepare()
+                p.start()
+                return 'Воспроизведение...'
+            except Exception as e:
+                errors.append('path: ' + str(e)[:60])
+                return None
+
         def try_pfd():
-            if not uri_str:
+            if not uri_str or uri_str == 'None':
                 return None
             try:
                 resolver = PythonActivity.mActivity.getContentResolver()
@@ -461,11 +459,11 @@ class DictaphoneApp(App):
                 p.start()
                 return 'Воспроизведение...'
             except Exception as e:
-                errors.append('pfd: ' + str(e)[:80])
+                errors.append('pfd: ' + str(e)[:60])
                 return None
 
         def try_copy():
-            if not uri_str:
+            if not uri_str or uri_str == 'None':
                 return None
             try:
                 resolver = PythonActivity.mActivity.getContentResolver()
@@ -490,36 +488,10 @@ class DictaphoneApp(App):
                 p.start()
                 return 'Воспроизведение...'
             except Exception as e:
-                errors.append('copy: ' + str(e)[:80])
+                errors.append('copy: ' + str(e)[:60])
                 return None
 
-        def try_direct():
-            if not uri_str:
-                return None
-            try:
-                p = MediaPlayer()
-                p.setDataSource(PythonActivity.mActivity, UriCls.parse(uri_str))
-                p.prepare()
-                p.start()
-                return 'Воспроизведение...'
-            except Exception as e:
-                errors.append('direct: ' + str(e)[:80])
-                return None
-
-        def try_path():
-            if not path or not os.path.exists(path):
-                return None
-            try:
-                p = MediaPlayer()
-                p.setDataSource(path)
-                p.prepare()
-                p.start()
-                return 'Воспроизведение...'
-            except Exception as e:
-                errors.append('path: ' + str(e)[:80])
-                return None
-
-        msg = try_pfd() or try_copy() or try_direct() or try_path()
+        msg = try_path() or try_pfd() or try_copy()
         if msg:
             self.show_status(msg)
         else:
@@ -531,7 +503,7 @@ class DictaphoneApp(App):
             self.show_status('Отправка доступна на Android')
             return
         uri_str = note.get('uri', '')
-        if uri_str:
+        if uri_str and uri_str != 'None':
             uri_obj = UriCls.parse(uri_str)
         else:
             path = note.get('path', '')
@@ -571,7 +543,7 @@ class DictaphoneApp(App):
             view_intent.setDataAndType(uri_obj, 'audio/mp4')
             view_intent.addFlags(1)
             activity.startActivity(view_intent)
-            self.show_status('Меню не открылось (' + errors[0] + '). Открыл плеер')
+            self.show_status('Меню не открылось, открыл плеер')
         except Exception:
             self.show_status('Ошибка отправки: ' + (errors[0] if errors else 'нет файла'))
 
