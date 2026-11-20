@@ -1,4 +1,4 @@
- # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import os
 import json
 import time
@@ -88,7 +88,7 @@ class NoteItem(BoxLayout):
         ))
         self.add_widget(left)
 
-        r        right = BoxLayout(orientation='horizontal', size_hint_x=0.32, spacing=4)
+             right = BoxLayout(orientation='horizontal', size_hint_x=0.32, spacing=4)
         btn_play = Button(
             text='СЛУШАТЬ',
             font_name=FONT_REGULAR,
