@@ -1,11 +1,13 @@
 [app]
 
-title = Sputnik
+title = MICROFON
 package.name = sputnik
 package.domain = org.vodolei
 source.dir = .
 source.include_exts = py,png,jpg,kv,txt,ttf
 version = 1.0
+icon.filename = %(source.dir)s/icon.png
+presplash.filename = %(source.dir)s/presplash.png
 
 requirements = python3,kivy,pyjnius
 
