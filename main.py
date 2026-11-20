@@ -71,24 +71,24 @@ class NoteItem(BoxLayout):
         self.height = 56
         with_bg(self, self.PALETTE[index % len(self.PALETTE)])
 
-        left = BoxLayout(orientation='vertical', size_hint_x=0.6)
+        left = BoxLayout(orientation='vertical', size_hint_x=0.68)
         left.add_widget(Label(
             text=note.get('date', ''),
             font_name=FONT_BOLD,
             color=(0.1, 0.1, 0.1, 1),
-            font_size='15sp',
+            font_size='14sp',
             size_hint_y=None,
-            height=24,
+            height=22,
         ))
         left.add_widget(Label(
             text=note.get('text') or '(без текста)',
             font_name=FONT_REGULAR,
             color=(0.15, 0.15, 0.15, 1),
-            font_size='14sp',
+            font_size='13sp',
         ))
         self.add_widget(left)
 
-             right = BoxLayout(orientation='horizontal', size_hint_x=0.32, spacing=4)
+        right = BoxLayout(orientation='horizontal', size_hint_x=0.32, spacing=4)
         btn_play = Button(
             text='СЛУШАТЬ',
             font_name=FONT_REGULAR,
@@ -358,7 +358,7 @@ class DictaphoneApp(App):
         except Exception as e:
             self.show_status('Ошибка воспроизведения: ' + str(e))
 
-        def share_note(self, note):
+    def share_note(self, note):
         if not ANDROID:
             self.show_status('Отправка доступна на Android')
             return
@@ -399,7 +399,6 @@ class DictaphoneApp(App):
             self.show_status('Меню не открылось (' + errors[0] + '). Открыто через плеер')
         except Exception:
             self.show_status('Ошибка отправки: ' + errors[0])
-
 
     def load_notes(self):
         self.notes = []
