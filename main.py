@@ -106,29 +106,29 @@ class NoteItem(BoxLayout):
             background_color=(0.95, 0.55, 0.05, 1),
         )
         btn_share.bind(on_release=lambda *a: on_share(self.note))
-        self.btn_delete = Button(
+        btn_delete = Button(
             text='УДАЛИТЬ',
             font_name=FONT_REGULAR,
             font_size='9sp',
             background_color=(0.7, 0.15, 0.15, 1),
         )
-        self.btn_delete.bind(on_release=self.on_delete_tap)
+        btn_delete.bind(on_release=lambda *a: on_delete_tap(self, note))
         right.add_widget(btn_play)
         right.add_widget(btn_share)
-        right.add_widget(self.btn_delete)
+        right.add_widget(btn_delete)
         self.add_widget(right)
 
-        self.on_delete = on_delete
+        self.btn_delete = btn_delete
 
-    def on_delete_tap(self, *args):
-        if not self._armed:
-            self._armed = True
-            self.btn_delete.text = 'ТОЧНО?'
-            self.btn_delete.background_color = (0.45, 0.05, 0.05, 1)
-            Clock.schedule_once(self._disarm, 3)
-        else:
-            self._armed = False
-            self.on_delete(self.note)
+        def on_delete_tap(item, note):
+            if not item._armed:
+                item._armed = True
+                item.btn_delete.text = 'ТОЧНО?'
+                item.btn_delete.background_color = (0.45, 0.05, 0.05, 1)
+                Clock.schedule_once(item._disarm, 3)
+            else:
+                item._armed = False
+                on_delete(note)
 
     def _disarm(self, dt):
         self._armed = False
@@ -255,7 +255,7 @@ class DictaphoneApp(App):
             halign='left',
             valign='middle',
             size_hint_y=None,
-            height=46,
+            height=60,
         )
 
         def _sync_status(inst, w):
@@ -447,8 +447,53 @@ class DictaphoneApp(App):
             return
         uri_str = note.get('uri', '')
         path = note.get('path', '')
+        errors = []
 
-        def try_uri_direct():
+        def try_pfd():
+            if not uri_str:
+                return None
+            try:
+                resolver = PythonActivity.mActivity.getContentResolver()
+                pfd = resolver.openFileDescriptor(UriCls.parse(uri_str), 'r')
+                p = MediaPlayer()
+                p.setDataSource(pfd.getFileDescriptor())
+                p.prepare()
+                p.start()
+                return 'Воспроизведение...'
+            except Exception as e:
+                errors.append('pfd: ' + str(e)[:80])
+                return None
+
+        def try_copy():
+            if not uri_str:
+                return None
+            try:
+                resolver = PythonActivity.mActivity.getContentResolver()
+                src = resolver.openInputStream(UriCls.parse(uri_str))
+                try:
+                    data = bytes(src.readAllBytes())
+                except Exception:
+                    buf = bytearray()
+                    while True:
+                        c = src.read()
+                        if c == -1 or c is None:
+                            break
+                        buf.append(c)
+                    data = bytes(buf)
+                src.close()
+                tmp = os.path.join(self.user_data_dir, 'play_tmp.m4a')
+                with open(tmp, 'wb') as f:
+                    f.write(data)
+                p = MediaPlayer()
+                p.setDataSource(tmp)
+                p.prepare()
+                p.start()
+                return 'Воспроизведение...'
+            except Exception as e:
+                errors.append('copy: ' + str(e)[:80])
+                return None
+
+        def try_direct():
             if not uri_str:
                 return None
             try:
@@ -458,7 +503,7 @@ class DictaphoneApp(App):
                 p.start()
                 return 'Воспроизведение...'
             except Exception as e:
-                print('uri play failed:', e)
+                errors.append('direct: ' + str(e)[:80])
                 return None
 
         def try_path():
@@ -471,38 +516,15 @@ class DictaphoneApp(App):
                 p.start()
                 return 'Воспроизведение...'
             except Exception as e:
-                print('path play failed:', e)
+                errors.append('path: ' + str(e)[:80])
                 return None
 
-        def try_uri_copy():
-            if not uri_str:
-                return None
-            try:
-                resolver = PythonActivity.mActivity.getContentResolver()
-                src = resolver.openInputStream(UriCls.parse(uri_str))
-                tmp = os.path.join(self.user_data_dir, 'play_tmp.m4a')
-                with open(tmp, 'wb') as f:
-                    buf = bytearray(65536)
-                    while True:
-                        n = src.read(buf)
-                        if n == -1 or n <= 0:
-                            break
-                        f.write(buf[:n])
-                src.close()
-                p = MediaPlayer()
-                p.setDataSource(tmp)
-                p.prepare()
-                p.start()
-                return 'Воспроизведение (через копию)...'
-            except Exception as e:
-                print('copy play failed:', e)
-                return None
-
-        msg = try_uri_direct() or try_path() or try_uri_copy()
+        msg = try_pfd() or try_copy() or try_direct() or try_path()
         if msg:
             self.show_status(msg)
         else:
-            self.show_status('Файл записи недоступен')
+            self.show_status('Ошибка воспроизведения: ' + (errors[0] if errors else 'нет файла'))
+            print('play errors:', errors)
 
     def share_note(self, note):
         if not ANDROID:
@@ -542,16 +564,16 @@ class DictaphoneApp(App):
                 self.show_status('Открываю меню отправки...')
                 return
             except Exception as e:
-                errors.append(name + ': ' + str(e)[:100])
+                errors.append(name + ': ' + str(e)[:70])
         print('share errors:', errors)
         try:
             view_intent = IntentCls(IntentCls.ACTION_VIEW)
             view_intent.setDataAndType(uri_obj, 'audio/mp4')
             view_intent.addFlags(1)
             activity.startActivity(view_intent)
-            self.show_status('Меню не открылось — запись в плеере')
+            self.show_status('Меню не открылось (' + errors[0] + '). Открыл плеер')
         except Exception:
-            self.show_status('Не удалось открыть запись')
+            self.show_status('Ошибка отправки: ' + (errors[0] if errors else 'нет файла'))
 
     def load_notes(self):
         self.notes = []
@@ -585,7 +607,7 @@ class DictaphoneApp(App):
             notes = [n for n in notes if search in (n.get('text') or '').lower()]
         if not notes:
             self.list_container.add_widget(Label(
-                text='Заметок пока нет — нажмите красную кнопку',
+                text='Заметок пока нет — нажмите кнопку Начать запись',
                 font_name=FONT_REGULAR,
                 color=(0.45, 0.45, 0.45, 1),
                 size_hint_y=None,
