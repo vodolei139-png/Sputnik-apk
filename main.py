@@ -76,6 +76,21 @@ class WatermarkLabel(Label):
         self._rot.angle = self._angle
 
 
+class WrapLabel(Label):
+    def __init__(self, on_layout_change=None, **kwargs):
+        super(WrapLabel, self).__init__(**kwargs)
+        self._on_layout_change = on_layout_change
+        self.size_hint_y = None
+        self.halign = 'left'
+        self.bind(width=self._upd, texture_size=self._upd)
+        Clock.schedule_once(self._upd, 0)
+
+    def _upd(self, *args):
+        self.text_size = (self.width, None)
+        if self._on_layout_change:
+            self._on_layout_change(self.texture_size[1])
+
+
 def fmt_mmss(total_ms):
     total_sec = int(total_ms // 1000)
     return '{:d}:{:02d}'.format(total_sec // 60, total_sec % 60)
@@ -99,7 +114,12 @@ class NoteItem(BoxLayout):
         self.height = 78
         with_bg(self, self.PALETTE[index % len(self.PALETTE)])
 
-        left = BoxLayout(orientation='vertical', size_hint_x=0.48)
+        left = BoxLayout(
+            orientation='vertical',
+            size_hint_x=0.48,
+            size_hint_y=None,
+            spacing=2,
+        )
         left.add_widget(Label(
             text=note.get('date', ''),
             font_name=FONT_BOLD,
@@ -108,16 +128,19 @@ class NoteItem(BoxLayout):
             size_hint_y=None,
             height=22,
         ))
-        lbl_text = Label(
+
+        def _relayout(text_height):
+            new_h = max(78, text_height + 22 + 14)
+            if new_h != self.height:
+                self.height = new_h
+
+        lbl_text = WrapLabel(
             text=note.get('text') or '(без текста)',
             font_name=FONT_REGULAR,
             color=(0.15, 0.15, 0.15, 1),
             font_size='12sp',
-            halign='left',
-            valign='middle',
+            on_layout_change=_relayout,
         )
-        lbl_text.bind(width=lambda inst, w: setattr(
-            inst, 'text_size', (w, inst.height)))
         left.add_widget(lbl_text)
         self.add_widget(left)
 
@@ -392,7 +415,7 @@ class DictaphoneApp(App):
             else:
                 self.stop_play()
                 self.show_status('Воспроизведение завершено')
-        except Exception as e:
+        except Exception:
             self.stop_play()
             self.show_status('Конец воспроизведения')
 
@@ -518,7 +541,6 @@ class DictaphoneApp(App):
         uri_str = note.get('uri', '')
         path = note.get('path', '')
         errors = []
-        started = False
 
         self.stop_play()
 
@@ -633,14 +655,32 @@ class DictaphoneApp(App):
         except Exception as e:
             errors.append('putExtra: ' + str(e)[:90])
 
-        if attached:
+        if not attached:
+            print('share errors:', errors)
+            self.show_status('Ошибка отправки: ' + '; '.join(errors)[:300])
+            return
+
+        launched = False
+
+        try:
+            chooser_title = cast('java.lang.CharSequence',
+                                 StringCls('Отправить запись'))
+            chooser = IntentCls.createChooser(intent, chooser_title)
+        except Exception as e:
+            errors.append('chooser: ' + str(e)[:90])
+            chooser = None
+
+        for send_intent in ([chooser, intent] if chooser else [intent]):
             try:
-                activity.startActivity(
-                    IntentCls.createChooser(intent, 'Отправить запись'))
-                self.show_status('Меню отправки (' + ', '.join(attached) + ')')
-                return
+                activity.startActivity(send_intent)
+                launched = True
+                break
             except Exception as e:
                 errors.append('start: ' + str(e)[:90])
+
+        if launched:
+            self.show_status('Меню отправки (' + ', '.join(attached) + ')')
+            return
 
         print('share errors:', errors)
         fallback = '; '.join(errors)[:300]
