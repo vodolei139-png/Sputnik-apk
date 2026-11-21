@@ -91,7 +91,11 @@ class NoteItem(BoxLayout):
             halign='left',
             valign='middle',
         )
-        lbl_text.bind(width=lambda inst, w: setattr(inst, 'text_size', (w, None)))
+
+        def _sync_text(inst, w, h):
+            inst.text_size = (w, h)
+
+        lbl_text.bind(width=_sync_text, height=_sync_text)
         left.add_widget(lbl_text)
         self.add_widget(left)
 
@@ -236,17 +240,17 @@ class DictaphoneApp(App):
             text='Готов к записи',
             font_name=FONT_REGULAR,
             color=(0.6, 0.1, 0.1, 1),
-            font_size='13sp',
+            font_size='12sp',
             halign='left',
             valign='middle',
             size_hint_y=None,
-            height=60,
+            height=84,
         )
 
-        def _sync_status(inst, w):
-            inst.text_size = (w, None)
+        def _sync_status(inst, w, h):
+            inst.text_size = (w, h)
 
-        self.lbl_status.bind(width=_sync_status)
+        self.lbl_status.bind(width=_sync_status, height=_sync_status)
         root.add_widget(self.lbl_status)
 
         if not ANDROID and ANDROID_ERR:
@@ -536,16 +540,17 @@ class DictaphoneApp(App):
                 self.show_status('Открываю меню отправки...')
                 return
             except Exception as e:
-                errors.append(name + ': ' + str(e)[:70])
+                errors.append(name + ': ' + str(e)[:120])
         print('share errors:', errors)
+        fallback = '; '.join(errors)[:350]
         try:
             view_intent = IntentCls(IntentCls.ACTION_VIEW)
             view_intent.setDataAndType(uri_obj, 'audio/mp4')
             view_intent.addFlags(1)
             activity.startActivity(view_intent)
-            self.show_status('Меню не открылось, открыл плеер')
+            self.show_status('ОТКРЫЛ ПЛЕЕР. Ошибки: ' + fallback)
         except Exception:
-            self.show_status('Ошибка отправки: ' + (errors[0] if errors else 'нет файла'))
+            self.show_status('Ошибка отправки: ' + (fallback or 'нет файла'))
 
     def load_notes(self):
         self.notes = []
