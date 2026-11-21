@@ -724,13 +724,18 @@ class DictaphoneApp(App):
         if search:
             notes = [n for n in notes if search in (n.get('text') or '').lower()]
         if not notes:
-            self.list_container.add_widget(Label(
+            empty_lbl = Label(
                 text='Заметок пока нет — нажмите кнопку Начать запись',
                 font_name=FONT_REGULAR,
                 color=(0.45, 0.45, 0.45, 1),
+                font_size='13sp',
                 size_hint_y=None,
-                height=40,
-            ))
+                height=44,
+                halign='center',
+            )
+            empty_lbl.bind(width=lambda inst, w: setattr(
+                inst, 'text_size', (w, inst.height)))
+            self.list_container.add_widget(empty_lbl)
             return
         for index, note in enumerate(notes):
             self.list_container.add_widget(
