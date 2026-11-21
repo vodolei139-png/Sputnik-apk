@@ -34,6 +34,8 @@ try:
     MediaPlayer = autoclass('android.media.MediaPlayer')
     IntentCls = autoclass('android.content.Intent')
     ClipDataCls = autoclass('android.content.ClipData')
+    StringCls = autoclass('java.lang.String')
+    ArrayListCls = autoclass('java.util.ArrayList')
     UriCls = autoclass('android.net.Uri')
     FileCls = autoclass('java.io.File')
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -72,6 +74,11 @@ class WatermarkLabel(Label):
         self._rot.origin = self.center
         self._rot.axis = (0, 0, 1)
         self._rot.angle = self._angle
+
+
+def fmt_mmss(total_ms):
+    total_sec = int(total_ms // 1000)
+    return '{:d}:{:02d}'.format(total_sec // 60, total_sec % 60)
 
 
 class NoteItem(BoxLayout):
@@ -235,6 +242,8 @@ class DictaphoneApp(App):
         self.temp_path = None
         self.rec_start = 0.0
         self.timer_event = None
+        self.player = None
+        self.play_event = None
         self.load_notes()
 
     def build(self):
@@ -264,6 +273,7 @@ class DictaphoneApp(App):
             inst.text_size = (w, inst.height)
 
         wm_corner.bind(width=_sync_corner)
+        wm_corner.pos_hint = {'x': 0.02, 'y': 0.005}
         root.add_widget(wm_corner)
 
         header = with_bg(Label(
@@ -356,6 +366,35 @@ class DictaphoneApp(App):
                 self.show_status('Разрешения: ' + str(e))
 
         return root
+
+    def stop_play(self):
+        if self.play_event:
+            self.play_event.cancel()
+            self.play_event = None
+        if self.player:
+            try:
+                if self.player.isPlaying():
+                    self.player.stop()
+                self.player.release()
+            except Exception as e:
+                print('player release failed:', e)
+            self.player = None
+
+    def tick_play(self, dt):
+        if not self.player:
+            return
+        try:
+            pos = self.player.getCurrentPosition()
+            dur = self.player.getDuration()
+            if self.player.isPlaying() and pos < dur - 50:
+                self.show_status('Воспроизведение: {} / {}'.format(
+                    fmt_mmss(pos), fmt_mmss(dur)))
+            else:
+                self.stop_play()
+                self.show_status('Воспроизведение завершено')
+        except Exception as e:
+            self.stop_play()
+            self.show_status('Конец воспроизведения')
 
     def delete_note(self, note):
         uri_str = note.get('uri', '')
@@ -479,6 +518,17 @@ class DictaphoneApp(App):
         uri_str = note.get('uri', '')
         path = note.get('path', '')
         errors = []
+        started = False
+
+        self.stop_play()
+
+        def start_with(p):
+            p.prepare()
+            p.start()
+            self.player = p
+            self.play_event = Clock.schedule_interval(self.tick_play, 0.5)
+            self.tick_play(0)
+            return True
 
         def try_path():
             if not path or not os.path.exists(path):
@@ -486,9 +536,7 @@ class DictaphoneApp(App):
             try:
                 p = MediaPlayer()
                 p.setDataSource(path)
-                p.prepare()
-                p.start()
-                return 'Воспроизведение...'
+                return start_with(p)
             except Exception as e:
                 errors.append('path: ' + str(e)[:60])
                 return None
@@ -501,9 +549,7 @@ class DictaphoneApp(App):
                 pfd = resolver.openFileDescriptor(UriCls.parse(uri_str), 'r')
                 p = MediaPlayer()
                 p.setDataSource(pfd.getFileDescriptor())
-                p.prepare()
-                p.start()
-                return 'Воспроизведение...'
+                return start_with(p)
             except Exception as e:
                 errors.append('pfd: ' + str(e)[:60])
                 return None
@@ -530,17 +576,13 @@ class DictaphoneApp(App):
                     f.write(data)
                 p = MediaPlayer()
                 p.setDataSource(tmp)
-                p.prepare()
-                p.start()
-                return 'Воспроизведение...'
+                return start_with(p)
             except Exception as e:
                 errors.append('copy: ' + str(e)[:60])
                 return None
 
-        msg = try_path() or try_pfd() or try_copy()
-        if msg:
-            self.show_status(msg)
-        else:
+        started = try_path() or try_pfd() or try_copy()
+        if not started:
             self.show_status('Ошибка воспроизведения: ' + (errors[0] if errors else 'нет файла'))
             print('play errors:', errors)
 
@@ -559,32 +601,49 @@ class DictaphoneApp(App):
             uri_obj = UriCls.fromFile(FileCls(path))
         activity = PythonActivity.mActivity
         errors = []
+        attached = []
 
-        def make_stream_intent(filler):
-            intent = IntentCls()
-            intent.setAction(IntentCls.ACTION_SEND)
-            intent.setType('audio/mp4')
-            filler(intent)
-            intent.addFlags(1)
-            return IntentCls.createChooser(intent, 'Отправить запись')
+        intent = IntentCls()
+        intent.setAction(IntentCls.ACTION_SEND)
+        intent.setType('audio/mp4')
+        intent.addFlags(1)
 
-        attempts = [
-            ('putExtra Parcelable',
-             lambda i: i.putExtra(IntentCls.EXTRA_STREAM, cast('android.os.Parcelable', uri_obj))),
-            ('putExtra Uri',
-             lambda i: i.putExtra(IntentCls.EXTRA_STREAM, cast('android.net.Uri', uri_obj))),
-            ('ClipData',
-             lambda i: i.setClipData(ClipDataCls.newUri(activity.getContentResolver(), 'запись', uri_obj))),
-        ]
-        for name, filler in attempts:
+        try:
+            resolver = cast('android.content.ContentResolver',
+                            activity.getContentResolver())
+            label = cast('java.lang.CharSequence', StringCls('запись'))
+            clip = ClipDataCls.newUri(resolver, label, uri_obj)
+            intent.setClipData(clip)
+            attached.append('ClipData')
+        except Exception as e:
+            errors.append('ClipData: ' + str(e)[:90])
+
+        try:
+            arr = ArrayListCls()
+            arr.add(cast('android.os.Parcelable', uri_obj))
+            intent.putParcelableArrayListExtra(IntentCls.EXTRA_STREAM, arr)
+            attached.append('ArrayList')
+        except Exception as e:
+            errors.append('ArrayList: ' + str(e)[:90])
+
+        try:
+            intent.putExtra(IntentCls.EXTRA_STREAM,
+                            cast('android.os.Parcelable', uri_obj))
+            attached.append('putExtra')
+        except Exception as e:
+            errors.append('putExtra: ' + str(e)[:90])
+
+        if attached:
             try:
-                activity.startActivity(make_stream_intent(filler))
-                self.show_status('Открываю меню отправки...')
+                activity.startActivity(
+                    IntentCls.createChooser(intent, 'Отправить запись'))
+                self.show_status('Меню отправки (' + ', '.join(attached) + ')')
                 return
             except Exception as e:
-                errors.append(name + ': ' + str(e)[:120])
+                errors.append('start: ' + str(e)[:90])
+
         print('share errors:', errors)
-        fallback = '; '.join(errors)[:350]
+        fallback = '; '.join(errors)[:300]
         try:
             view_intent = IntentCls(IntentCls.ACTION_VIEW)
             view_intent.setDataAndType(uri_obj, 'audio/mp4')
@@ -630,7 +689,7 @@ class DictaphoneApp(App):
                 font_name=FONT_REGULAR,
                 color=(0.45, 0.45, 0.45, 1),
                 size_hint_y=None,
-                height=80,
+                height=40,
             ))
             return
         for index, note in enumerate(notes):
