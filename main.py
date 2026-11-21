@@ -217,29 +217,60 @@ def save_to_music(temp_path):
                 data = f.read()
             activity = PythonActivity.mActivity
             resolver = activity.getContentResolver()
-            values = ContentValues()
-            values.put('title', filename)
-            values.put('display_name', filename)
-            values.put('mime_type', 'audio/mp4')
-            values.put('relative_path', RECORD_DIR)
-            values.put('is_pending', '1')
-            uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
+
+            base_pairs = [
+                ('title', filename),
+                ('mime_type', 'audio/mp4'),
+                ('relative_path', RECORD_DIR),
+            ]
+            full_pairs = base_pairs + [
+                ('display_name', filename),
+                ('is_pending', '1'),
+            ]
+
+            def insert_with(pairs):
+                values = ContentValues()
+                for k, v in pairs:
+                    values.put(k, v)
+                return resolver.insert(
+                    MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
+
+            uri = None
+            for pairs in (full_pairs, base_pairs):
+                try:
+                    uri = insert_with(pairs)
+                    if uri is not None:
+                        break
+                except Exception as e:
+                    print('insert attempt failed:', e)
             if uri is None:
                 result['note'] = 'MediaStore refused'
                 return result
-            out_stream = resolver.openOutputStream(uri)
-            out_stream.write(data)
-            out_stream.flush()
-            out_stream.close()
-            up = ContentValues()
-            up.put('is_pending', '0')
-            up.put('title', filename)
-            up.put('display_name', filename)
+
             try:
+                out_stream = resolver.openOutputStream(uri)
+                out_stream.write(data)
+                out_stream.flush()
+                out_stream.close()
+            except Exception as e:
+                result['note'] = 'write: ' + str(e)[:120]
+                return result
+
+            try:
+                up = ContentValues()
+                up.put('title', filename)
+                up.put('display_name', filename)
                 up.put('_size', len(data))
-            except Exception:
-                pass
-            resolver.update(uri, up, None, None)
+                resolver.update(uri, up, None, None)
+            except Exception as e:
+                print('metadata update failed:', e)
+                try:
+                    up2 = ContentValues()
+                    up2.put('title', filename)
+                    resolver.update(uri, up2, None, None)
+                except Exception as e2:
+                    print('title update failed:', e2)
+
             result['uri'] = str(uri)
             return result
         except Exception as e:
@@ -260,7 +291,6 @@ def save_to_music(temp_path):
     except Exception as e:
         result['note'] = 'Copy: ' + str(e)[:120]
         return result
-
 
 class DictaphoneApp(App):
     def __init__(self, **kwargs):
