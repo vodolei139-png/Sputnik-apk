@@ -7,11 +7,12 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Rotate
 
 FONT_REGULAR = 'fonts/Montserrat-Regular.ttf'
 FONT_BOLD = 'fonts/Montserrat-Bold.ttf'
@@ -54,6 +55,23 @@ def with_bg(widget, rgba):
 
     widget.bind(pos=_sync, size=_sync)
     return widget
+
+
+class WatermarkLabel(Label):
+    def __init__(self, angle=-30, **kwargs):
+        super(WatermarkLabel, self).__init__(**kwargs)
+        self._angle = angle
+        with self.canvas.before:
+            PushMatrix()
+            self._rot = Rotate()
+        with self.canvas.after:
+            PopMatrix()
+        self.bind(pos=self._sync_rot, size=self._sync_rot)
+
+    def _sync_rot(self, *args):
+        self._rot.origin = self.center
+        self._rot.axis = (0, 0, 1)
+        self._rot.angle = self._angle
 
 
 class NoteItem(BoxLayout):
@@ -221,7 +239,32 @@ class DictaphoneApp(App):
 
     def build(self):
         Window.clearcolor = (1, 1, 1, 1)
-        root = BoxLayout(orientation='vertical', padding=10, spacing=8)
+        root = FloatLayout()
+        content = BoxLayout(orientation='vertical', padding=10, spacing=8)
+        content.size_hint = (1, 1)
+
+        wm_center = WatermarkLabel(
+            text='SPUTNIK',
+            font_name=FONT_BOLD,
+            font_size='70sp',
+            color=(0.05, 0.2, 0.5, 0.05),
+        )
+        root.add_widget(wm_center)
+
+        wm_corner = WatermarkLabel(
+            text='SPUTNIK • v1.0',
+            font_name=FONT_REGULAR,
+            font_size='14sp',
+            color=(0.05, 0.2, 0.5, 0.12),
+            size_hint=(1, None),
+            height=30,
+        )
+
+        def _sync_corner(inst, w):
+            inst.text_size = (w, inst.height)
+
+        wm_corner.bind(width=_sync_corner)
+        root.add_widget(wm_corner)
 
         header = with_bg(Label(
             text='ДИКТОФОН С ЗАМЕТКАМИ',
@@ -231,7 +274,7 @@ class DictaphoneApp(App):
             size_hint_y=None,
             height=52,
         ), (0.05, 0.4, 0.75, 1))
-        root.add_widget(header)
+        content.add_widget(header)
 
         self.lbl_status = Label(
             text='Готов к записи',
@@ -248,7 +291,7 @@ class DictaphoneApp(App):
             inst.text_size = (w, inst.height)
 
         self.lbl_status.bind(width=_sync_status)
-        root.add_widget(self.lbl_status)
+        content.add_widget(self.lbl_status)
 
         if not ANDROID and ANDROID_ERR:
             self.show_status('Сборка без Android-модулей: ' + ANDROID_ERR)
@@ -262,9 +305,9 @@ class DictaphoneApp(App):
             height=70,
         )
         self.btn_record.bind(on_release=self.toggle_recording)
-        root.add_widget(self.btn_record)
+        content.add_widget(self.btn_record)
 
-        root.add_widget(Label(
+        content.add_widget(Label(
             text='Записи: Music/Sputnik (общедоступная папка)',
             font_name=FONT_REGULAR,
             color=(0.2, 0.35, 0.6, 1),
@@ -280,7 +323,7 @@ class DictaphoneApp(App):
             size_hint_y=None,
             height=70,
         )
-        root.add_widget(self.txt_note)
+        content.add_widget(self.txt_note)
 
         self.txt_search = TextInput(
             hint_text='Поиск по заметкам',
@@ -290,15 +333,17 @@ class DictaphoneApp(App):
             height=48,
         )
         self.txt_search.bind(text=self.on_search)
-        root.add_widget(self.txt_search)
+        content.add_widget(self.txt_search)
 
         self.list_container = BoxLayout(orientation='vertical', size_hint_y=None, spacing=6)
         self.list_container.bind(minimum_height=self.list_container.setter('height'))
         scroll = ScrollView(do_scroll_x=False)
         scroll.add_widget(self.list_container)
-        root.add_widget(scroll)
+        content.add_widget(scroll)
 
         self.refresh_notes_ui()
+
+        root.add_widget(content)
 
         if ANDROID:
             try:
@@ -585,7 +630,7 @@ class DictaphoneApp(App):
                 font_name=FONT_REGULAR,
                 color=(0.45, 0.45, 0.45, 1),
                 size_hint_y=None,
-                height=40,
+                height=80,
             ))
             return
         for index, note in enumerate(notes):
