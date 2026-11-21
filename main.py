@@ -679,7 +679,7 @@ class DictaphoneApp(App):
                 errors.append('start: ' + str(e)[:90])
 
         if launched:
-            self.show_status('Меню отправки (' + ', '.join(attached) + ')')
+            self.show_status('Меню отправки [mp4] (' + ', '.join(attached) + ')')
             return
 
         print('share errors:', errors)
