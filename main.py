@@ -213,27 +213,33 @@ def save_to_music(temp_path):
         sdk = 0
     if sdk >= 29:
         try:
+            with open(private_path, 'rb') as f:
+                data = f.read()
             activity = PythonActivity.mActivity
             resolver = activity.getContentResolver()
             values = ContentValues()
             values.put('title', filename)
+            values.put('display_name', filename)
             values.put('mime_type', 'audio/mp4')
             values.put('relative_path', RECORD_DIR)
+            values.put('is_pending', '1')
             uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
             if uri is None:
                 result['note'] = 'MediaStore refused'
                 return result
             out_stream = resolver.openOutputStream(uri)
-            with open(private_path, 'rb') as f:
-                data = f.read()
             out_stream.write(data)
+            out_stream.flush()
             out_stream.close()
+            up = ContentValues()
+            up.put('is_pending', '0')
+            up.put('title', filename)
+            up.put('display_name', filename)
             try:
-                up = ContentValues()
-                up.put('is_pending', '0')
-                resolver.update(uri, up, None, None)
-            except Exception as e:
-                print('pending update failed:', e)
+                up.put('_size', len(data))
+            except Exception:
+                pass
+            resolver.update(uri, up, None, None)
             result['uri'] = str(uri)
             return result
         except Exception as e:
