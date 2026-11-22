@@ -191,6 +191,7 @@ class NoteItem(BoxLayout):
 
 def save_to_music(temp_path):
     filename = 'rec_' + time.strftime('%Y%m%d_%H%M%S') + '.m4a'
+    result['filename'] = filename
     result = {'path': '', 'uri': '', 'note': None}
     if not ANDROID:
         result['path'] = temp_path
