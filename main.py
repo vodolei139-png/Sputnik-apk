@@ -82,11 +82,15 @@ class WrapLabel(Label):
         self._on_layout_change = on_layout_change
         self.size_hint_y = None
         self.halign = 'left'
+        self.valign = 'top'
         self.bind(width=self._upd, texture_size=self._upd)
         Clock.schedule_once(self._upd, 0)
 
     def _upd(self, *args):
+        if not self.width or self.width <= 0:
+            return
         self.text_size = (self.width, None)
+        self.height = self.texture_size[1]
         if self._on_layout_change:
             self._on_layout_change(self.texture_size[1])
 
@@ -117,7 +121,6 @@ class NoteItem(BoxLayout):
         left = BoxLayout(
             orientation='vertical',
             size_hint_x=0.48,
-            size_hint_y=None,
             spacing=2,
         )
         left.add_widget(Label(
@@ -130,7 +133,7 @@ class NoteItem(BoxLayout):
         ))
 
         def _relayout(text_height):
-            new_h = max(78, text_height + 22 + 14)
+            new_h = max(78, 22 + 2 + int(text_height) + 12)
             if new_h != self.height:
                 self.height = new_h
 
@@ -191,8 +194,7 @@ class NoteItem(BoxLayout):
 
 def save_to_music(temp_path):
     filename = 'rec_' + time.strftime('%Y%m%d_%H%M%S') + '.m4a'
-    result['filename'] = filename
-    result = {'path': '', 'uri': '', 'note': None}
+    result = {'path': '', 'uri': '', 'filename': filename, 'note': None}
     if not ANDROID:
         result['path'] = temp_path
         result['note'] = 'no android modules'
@@ -257,20 +259,17 @@ def save_to_music(temp_path):
                 result['note'] = 'write: ' + str(e)[:120]
                 return result
 
-            try:
-                up = ContentValues()
-                up.put('title', filename)
-                up.put('display_name', filename)
-                up.put('_size', len(data))
-                resolver.update(uri, up, None, None)
-            except Exception as e:
-                print('metadata update failed:', e)
+            for column, value in (
+                    ('title', filename),
+                    ('is_pending', '0'),
+                    ('display_name', filename),
+                    ('_size', str(len(data)))):
                 try:
-                    up2 = ContentValues()
-                    up2.put('title', filename)
-                    resolver.update(uri, up2, None, None)
-                except Exception as e2:
-                    print('title update failed:', e2)
+                    up = ContentValues()
+                    up.put(column, value)
+                    resolver.update(uri, up, None, None)
+                except Exception as e:
+                    print('meta skipped', column, ':', e)
 
             result['uri'] = str(uri)
             return result
@@ -292,6 +291,7 @@ def save_to_music(temp_path):
     except Exception as e:
         result['note'] = 'Copy: ' + str(e)[:120]
         return result
+
 
 class DictaphoneApp(App):
     def __init__(self, **kwargs):
@@ -555,10 +555,12 @@ class DictaphoneApp(App):
             'date': time.strftime('%d.%m.%Y %H:%M'),
             'path': '',
             'uri': '',
+            'filename': '',
         }
         result = save_to_music(temp_path)
         note['path'] = result['path']
         note['uri'] = result['uri']
+        note['filename'] = result.get('filename', '')
         if result['note']:
             note['note'] = result['note']
         self.notes.append(note)
@@ -666,6 +668,12 @@ class DictaphoneApp(App):
         intent.setAction(IntentCls.ACTION_SEND)
         intent.setType('audio/mp4')
         intent.addFlags(1)
+
+        display_name = note.get('filename') or 'Sputnik запись'
+        try:
+            intent.putExtra(IntentCls.EXTRA_TITLE, StringCls(display_name))
+        except Exception as e:
+            print('title extra failed:', e)
 
         try:
             resolver = cast('android.content.ContentResolver',
