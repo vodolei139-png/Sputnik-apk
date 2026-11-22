@@ -599,7 +599,7 @@ class DictaphoneApp(App):
             self.show_status('Сохранено только внутри приложения: ' + result['note'])
         else:
             self.show_status(
-                'Записано: в файле {} б, через MediaStore {} б, Android {}'.format(
+                'Записано: файл {} б, uri {} б, Android {}'.format(
                     result.get('size', -1),
                     result.get('readback', -1),
                     result.get('sdk', '?')))
@@ -657,7 +657,6 @@ class DictaphoneApp(App):
                 if data_size <= 1:
                     errors.append('copy: пусто')
                     return None
-                tmp = os.path.join(self.user_data_dir, 'play_tmp.m4a')
                 src = resolver.openInputStream(UriCls.parse(uri_str))
                 data = None
                 try:
@@ -671,6 +670,7 @@ class DictaphoneApp(App):
                         buf.append(c)
                     data = bytes(buf)
                 src.close()
+                tmp = os.path.join(self.user_data_dir, 'play_tmp.m4a')
                 with open(tmp, 'wb') as f:
                     f.write(data)
                 p = MediaPlayer()
@@ -689,16 +689,56 @@ class DictaphoneApp(App):
         if not ANDROID:
             self.show_status('Отправка доступна на Android')
             return
+        activity = PythonActivity.mActivity
+        resolver = activity.getContentResolver()
         uri_str = note.get('uri', '')
+        private_path = note.get('path', '')
+
         if uri_str and uri_str != 'None':
             uri_obj = UriCls.parse(uri_str)
         else:
-            path = note.get('path', '')
-            if not path or not os.path.exists(path):
+            if not private_path or not os.path.exists(private_path):
                 self.show_status('Файл записи не найден')
                 return
-            uri_obj = UriCls.fromFile(FileCls(path))
-        activity = PythonActivity.mActivity
+            uri_obj = UriCls.fromFile(FileCls(private_path))
+
+        private_size = -1
+        if private_path and os.path.exists(private_path):
+            try:
+                private_size = os.path.getsize(private_path)
+            except Exception:
+                private_size = -1
+
+        uri_size = -1
+        if uri_str and uri_str != 'None':
+            try:
+                src = resolver.openInputStream(uri_obj)
+                uri_size = read_stream_size(src)
+                src.close()
+            except Exception as e:
+                print('uri read failed:', e)
+                uri_size = -1
+
+        repair_msg = ''
+        if (uri_str and uri_str != 'None'
+                and private_size > 1 and uri_size != private_size):
+            try:
+                with open(private_path, 'rb') as f:
+                    data = f.read()
+                out_stream = resolver.openOutputStream(uri_obj, 'wt')
+                out_stream.write(data)
+                out_stream.flush()
+                out_stream.close()
+                src = resolver.openInputStream(uri_obj)
+                uri_size = read_stream_size(src)
+                src.close()
+                if uri_size == private_size:
+                    repair_msg = ', починено'
+                else:
+                    repair_msg = ', починка не помогла ({} б)'.format(uri_size)
+            except Exception as e:
+                repair_msg = ', починка не удалась: ' + str(e)[:80]
+
         errors = []
         attached = []
 
@@ -714,10 +754,10 @@ class DictaphoneApp(App):
             print('title extra failed:', e)
 
         try:
-            resolver = cast('android.content.ContentResolver',
-                            activity.getContentResolver())
             label = cast('java.lang.CharSequence', StringCls('запись'))
-            clip = ClipDataCls.newUri(resolver, label, uri_obj)
+            clip = ClipDataCls.newUri(
+                cast('android.content.ContentResolver', resolver),
+                label, uri_obj)
             intent.setClipData(clip)
             attached.append('ClipData')
         except Exception as e:
@@ -762,7 +802,8 @@ class DictaphoneApp(App):
                 errors.append('start: ' + str(e)[:90])
 
         if launched:
-            self.show_status('Меню отправки [mp4] (' + ', '.join(attached) + ')')
+            self.show_status('Отправка [mp4]: файл {} б, uri {} б{}'.format(
+                private_size, uri_size, repair_msg))
             return
 
         print('share errors:', errors)
@@ -772,7 +813,8 @@ class DictaphoneApp(App):
             view_intent.setDataAndType(uri_obj, 'audio/mp4')
             view_intent.addFlags(1)
             activity.startActivity(view_intent)
-            self.show_status('ОТКРЫЛ ПЛЕЕР. Ошибки: ' + fallback)
+            self.show_status('ОТКРЫЛ ПЛЕЕР. файл {} б, uri {} б. Ошибки: {}'.format(
+                private_size, uri_size, fallback))
         except Exception:
             self.show_status('Ошибка отправки: ' + (fallback or 'нет файла'))
 
