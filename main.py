@@ -192,6 +192,19 @@ class NoteItem(BoxLayout):
         self.btn_delete.background_color = (0.7, 0.15, 0.15, 1)
 
 
+def read_stream_size(src):
+    try:
+        return len(bytes(src.readAllBytes()))
+    except Exception:
+        buf = bytearray()
+        while True:
+            c = src.read()
+            if c == -1 or c is None:
+                break
+            buf.append(c)
+        return len(buf)
+
+
 def save_to_music(temp_path):
     filename = 'rec_' + time.strftime('%Y%m%d_%H%M%S') + '.m4a'
     result = {'path': '', 'uri': '', 'filename': filename, 'note': None}
@@ -209,15 +222,22 @@ def save_to_music(temp_path):
         private_path = temp_path
     result['path'] = private_path
 
+    try:
+        with open(private_path, 'rb') as f:
+            data = f.read()
+        result['size'] = len(data)
+    except Exception as e:
+        result['note'] = 'read private: ' + str(e)[:120]
+        return result
+
     sdk = 0
     try:
         sdk = int(BuildVersion.SDK_INT)
     except Exception:
         sdk = 0
+    result['sdk'] = sdk
     if sdk >= 29:
         try:
-            with open(private_path, 'rb') as f:
-                data = f.read()
             activity = PythonActivity.mActivity
             resolver = activity.getContentResolver()
 
@@ -271,6 +291,14 @@ def save_to_music(temp_path):
                 except Exception as e:
                     print('meta skipped', column, ':', e)
 
+            readback = -1
+            try:
+                src = resolver.openInputStream(uri)
+                readback = read_stream_size(src)
+                src.close()
+            except Exception as e:
+                print('readback failed:', e)
+            result['readback'] = readback
             result['uri'] = str(uri)
             return result
         except Exception as e:
@@ -282,10 +310,9 @@ def save_to_music(temp_path):
         if not os.path.isdir(folder):
             os.makedirs(folder)
         target = os.path.join(folder, filename)
-        with open(private_path, 'rb') as f:
-            data = f.read()
         with open(target, 'wb') as f:
             f.write(data)
+        result['readback'] = len(data)
         result['path'] = target
         return result
     except Exception as e:
@@ -571,7 +598,11 @@ class DictaphoneApp(App):
         if result['note']:
             self.show_status('Сохранено только внутри приложения: ' + result['note'])
         else:
-            self.show_status('Запись сохранена (Music/Sputnik)')
+            self.show_status(
+                'Записано: в файле {} б, через MediaStore {} б, Android {}'.format(
+                    result.get('size', -1),
+                    result.get('readback', -1),
+                    result.get('sdk', '?')))
 
     def play_note(self, note):
         if not ANDROID:
@@ -621,6 +652,14 @@ class DictaphoneApp(App):
             try:
                 resolver = PythonActivity.mActivity.getContentResolver()
                 src = resolver.openInputStream(UriCls.parse(uri_str))
+                data_size = read_stream_size(src)
+                src.close()
+                if data_size <= 1:
+                    errors.append('copy: пусто')
+                    return None
+                tmp = os.path.join(self.user_data_dir, 'play_tmp.m4a')
+                src = resolver.openInputStream(UriCls.parse(uri_str))
+                data = None
                 try:
                     data = bytes(src.readAllBytes())
                 except Exception:
@@ -632,7 +671,6 @@ class DictaphoneApp(App):
                         buf.append(c)
                     data = bytes(buf)
                 src.close()
-                tmp = os.path.join(self.user_data_dir, 'play_tmp.m4a')
                 with open(tmp, 'wb') as f:
                     f.write(data)
                 p = MediaPlayer()
