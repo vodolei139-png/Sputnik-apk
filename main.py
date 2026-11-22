@@ -241,31 +241,30 @@ def save_to_music(temp_path):
             activity = PythonActivity.mActivity
             resolver = activity.getContentResolver()
 
-            base_pairs = [
-                ('title', filename),
-                ('mime_type', 'audio/mp4'),
-                ('relative_path', RECORD_DIR),
-            ]
-            full_pairs = base_pairs + [
-                ('display_name', filename),
-                ('is_pending', '1'),
-            ]
-
-            def insert_with(pairs):
-                values = ContentValues()
-                for k, v in pairs:
-                    values.put(k, v)
-                return resolver.insert(
-                    MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
+            values = ContentValues()
+            values.put('title', filename)
+            values.put('_display_name', filename)
+            values.put('mime_type', 'audio/mp4')
+            values.put('relative_path', RECORD_DIR)
+            values.put('is_pending', '1')
 
             uri = None
-            for pairs in (full_pairs, base_pairs):
+            try:
+                uri = resolver.insert(
+                    MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
+            except Exception as e:
+                print('full insert failed:', e)
+
+            if uri is None:
+                values2 = ContentValues()
+                values2.put('title', filename)
+                values2.put('mime_type', 'audio/mp4')
+                values2.put('relative_path', RECORD_DIR)
                 try:
-                    uri = insert_with(pairs)
-                    if uri is not None:
-                        break
+                    uri = resolver.insert(
+                        MediaStoreAudio.EXTERNAL_CONTENT_URI, values2)
                 except Exception as e:
-                    print('insert attempt failed:', e)
+                    print('base insert failed:', e)
             if uri is None:
                 result['note'] = 'MediaStore refused'
                 return result
@@ -279,17 +278,19 @@ def save_to_music(temp_path):
                 result['note'] = 'write: ' + str(e)[:120]
                 return result
 
-            for column, value in (
-                    ('title', filename),
-                    ('is_pending', '0'),
-                    ('display_name', filename),
-                    ('_size', str(len(data)))):
-                try:
-                    up = ContentValues()
-                    up.put(column, value)
-                    resolver.update(uri, up, None, None)
-                except Exception as e:
-                    print('meta skipped', column, ':', e)
+            try:
+                up = ContentValues()
+                up.put('is_pending', '0')
+                resolver.update(uri, up, None, None)
+            except Exception as e:
+                print('pending update failed:', e)
+
+            try:
+                up2 = ContentValues()
+                up2.put('_size', int(len(data)))
+                resolver.update(uri, up2, None, None)
+            except Exception as e:
+                print('size update failed:', e)
 
             readback = -1
             try:
@@ -300,6 +301,8 @@ def save_to_music(temp_path):
                 print('readback failed:', e)
             result['readback'] = readback
             result['uri'] = str(uri)
+            if readback <= 1:
+                result['note'] = 'MediaStore пуст после записи'
             return result
         except Exception as e:
             result['note'] = 'MediaStore: ' + str(e)[:120]
@@ -725,7 +728,10 @@ class DictaphoneApp(App):
             try:
                 with open(private_path, 'rb') as f:
                     data = f.read()
-                out_stream = resolver.openOutputStream(uri_obj, 'wt')
+                try:
+                    out_stream = resolver.openOutputStream(uri_obj, 'wt')
+                except Exception:
+                    out_stream = resolver.openOutputStream(uri_obj)
                 out_stream.write(data)
                 out_stream.flush()
                 out_stream.close()
@@ -870,7 +876,6 @@ class DictaphoneApp(App):
     def show_status(self, text):
         self.lbl_status.text = text
         print('[STATUS]', text)
-
 
 if __name__ == '__main__':
     DictaphoneApp().run()
