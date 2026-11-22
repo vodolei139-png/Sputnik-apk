@@ -205,6 +205,61 @@ def read_stream_size(src):
         return len(buf)
 
 
+def create_media_entry(data, filename):
+    """Создаёт свежую запись в MediaStore и возвращает (uri_obj, uri_str, размер)."""
+    resolver = PythonActivity.mActivity.getContentResolver()
+    values = ContentValues()
+    values.put('title', filename)
+    values.put('_display_name', filename)
+    values.put('mime_type', 'audio/mp4')
+    values.put('relative_path', RECORD_DIR)
+    values.put('is_pending', '1')
+
+    uri = None
+    try:
+        uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
+    except Exception as e:
+        print('fresh insert failed:', e)
+
+    if uri is None:
+        values2 = ContentValues()
+        values2.put('title', filename)
+        values2.put('mime_type', 'audio/mp4')
+        values2.put('relative_path', RECORD_DIR)
+        try:
+            uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values2)
+        except Exception as e:
+            print('fresh base insert failed:', e)
+    if uri is None:
+        return None, '', -1
+
+    try:
+        out_stream = resolver.openOutputStream(uri)
+        out_stream.write(data)
+        out_stream.flush()
+        out_stream.close()
+    except Exception as e:
+        print('fresh write failed:', e)
+        return None, '', -1
+
+    try:
+        up = ContentValues()
+        up.put('is_pending', '0')
+        resolver.update(uri, up, None, None)
+    except Exception as e:
+        print('fresh pending update failed:', e)
+
+    readback = -1
+    try:
+        src = resolver.openInputStream(uri)
+        readback = read_stream_size(src)
+        src.close()
+    except Exception as e:
+        print('fresh readback failed:', e)
+
+    return uri, str(uri), readback
+
+
 def save_to_music(temp_path):
     filename = 'rec_' + time.strftime('%Y%m%d_%H%M%S') + '.m4a'
     result = {'path': '', 'uri': '', 'filename': filename, 'note': None}
@@ -237,76 +292,15 @@ def save_to_music(temp_path):
         sdk = 0
     result['sdk'] = sdk
     if sdk >= 29:
-        try:
-            activity = PythonActivity.mActivity
-            resolver = activity.getContentResolver()
-
-            values = ContentValues()
-            values.put('title', filename)
-            values.put('_display_name', filename)
-            values.put('mime_type', 'audio/mp4')
-            values.put('relative_path', RECORD_DIR)
-            values.put('is_pending', '1')
-
-            uri = None
-            try:
-                uri = resolver.insert(
-                    MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
-            except Exception as e:
-                print('full insert failed:', e)
-
-            if uri is None:
-                values2 = ContentValues()
-                values2.put('title', filename)
-                values2.put('mime_type', 'audio/mp4')
-                values2.put('relative_path', RECORD_DIR)
-                try:
-                    uri = resolver.insert(
-                        MediaStoreAudio.EXTERNAL_CONTENT_URI, values2)
-                except Exception as e:
-                    print('base insert failed:', e)
-            if uri is None:
-                result['note'] = 'MediaStore refused'
-                return result
-
-            try:
-                out_stream = resolver.openOutputStream(uri)
-                out_stream.write(data)
-                out_stream.flush()
-                out_stream.close()
-            except Exception as e:
-                result['note'] = 'write: ' + str(e)[:120]
-                return result
-
-            try:
-                up = ContentValues()
-                up.put('is_pending', '0')
-                resolver.update(uri, up, None, None)
-            except Exception as e:
-                print('pending update failed:', e)
-
-            try:
-                up2 = ContentValues()
-                up2.put('_size', int(len(data)))
-                resolver.update(uri, up2, None, None)
-            except Exception as e:
-                print('size update failed:', e)
-
-            readback = -1
-            try:
-                src = resolver.openInputStream(uri)
-                readback = read_stream_size(src)
-                src.close()
-            except Exception as e:
-                print('readback failed:', e)
-            result['readback'] = readback
-            result['uri'] = str(uri)
-            if readback <= 1:
-                result['note'] = 'MediaStore пуст после записи'
+        uri, uri_str, readback = create_media_entry(data, filename)
+        if uri is None:
+            result['note'] = 'MediaStore: запись не создана'
             return result
-        except Exception as e:
-            result['note'] = 'MediaStore: ' + str(e)[:120]
-            return result
+        result['uri'] = uri_str
+        result['readback'] = readback
+        if readback <= 1:
+            result['note'] = 'MediaStore пуст после записи'
+        return result
     try:
         base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
         folder = os.path.join(str(base), 'Sputnik')
@@ -650,30 +644,12 @@ class DictaphoneApp(App):
                 return None
 
         def try_copy():
-            if not uri_str or uri_str == 'None':
+            if not path or not os.path.exists(path):
                 return None
             try:
-                resolver = PythonActivity.mActivity.getContentResolver()
-                src = resolver.openInputStream(UriCls.parse(uri_str))
-                data_size = read_stream_size(src)
-                src.close()
-                if data_size <= 1:
-                    errors.append('copy: пусто')
-                    return None
-                src = resolver.openInputStream(UriCls.parse(uri_str))
-                data = None
-                try:
-                    data = bytes(src.readAllBytes())
-                except Exception:
-                    buf = bytearray()
-                    while True:
-                        c = src.read()
-                        if c == -1 or c is None:
-                            break
-                        buf.append(c)
-                    data = bytes(buf)
-                src.close()
                 tmp = os.path.join(self.user_data_dir, 'play_tmp.m4a')
+                with open(path, 'rb') as f:
+                    data = f.read()
                 with open(tmp, 'wb') as f:
                     f.write(data)
                 p = MediaPlayer()
@@ -696,54 +672,50 @@ class DictaphoneApp(App):
         resolver = activity.getContentResolver()
         uri_str = note.get('uri', '')
         private_path = note.get('path', '')
+        filename = note.get('filename') or 'Sputnik запись'
 
-        if uri_str and uri_str != 'None':
-            uri_obj = UriCls.parse(uri_str)
-        else:
-            if not private_path or not os.path.exists(private_path):
-                self.show_status('Файл записи не найден')
-                return
-            uri_obj = UriCls.fromFile(FileCls(private_path))
+        if not private_path or not os.path.exists(private_path):
+            self.show_status('Частная копия записи не найдена')
+            return
 
-        private_size = -1
-        if private_path and os.path.exists(private_path):
-            try:
-                private_size = os.path.getsize(private_path)
-            except Exception:
-                private_size = -1
+        try:
+            with open(private_path, 'rb') as f:
+                data = f.read()
+        except Exception as e:
+            self.show_status('Частная копия не читается: ' + str(e)[:100])
+            return
+        private_size = len(data)
 
+        uri_obj = None
         uri_size = -1
         if uri_str and uri_str != 'None':
             try:
+                uri_obj = UriCls.parse(uri_str)
                 src = resolver.openInputStream(uri_obj)
                 uri_size = read_stream_size(src)
                 src.close()
             except Exception as e:
-                print('uri read failed:', e)
+                print('old uri dead:', e)
+                uri_obj = None
                 uri_size = -1
 
-        repair_msg = ''
-        if (uri_str and uri_str != 'None'
-                and private_size > 1 and uri_size != private_size):
-            try:
-                with open(private_path, 'rb') as f:
-                    data = f.read()
+        fresh_msg = ''
+        if uri_obj is None or uri_size != private_size:
+            if uri_obj is not None:
                 try:
-                    out_stream = resolver.openOutputStream(uri_obj, 'wt')
+                    resolver.delete(uri_obj, None, None)
                 except Exception:
-                    out_stream = resolver.openOutputStream(uri_obj)
-                out_stream.write(data)
-                out_stream.flush()
-                out_stream.close()
-                src = resolver.openInputStream(uri_obj)
-                uri_size = read_stream_size(src)
-                src.close()
-                if uri_size == private_size:
-                    repair_msg = ', починено'
-                else:
-                    repair_msg = ', починка не помогла ({} б)'.format(uri_size)
-            except Exception as e:
-                repair_msg = ', починка не удалась: ' + str(e)[:80]
+                    pass
+            uri_obj, uri_str2, readback = create_media_entry(data, filename)
+            if uri_obj is not None and readback == private_size:
+                note['uri'] = uri_str2
+                self.save_notes()
+                fresh_msg = ' (свежая запись)'
+            else:
+                self.show_status(
+                    'Свежая запись не удалась: файл {} б, uri {} б'.format(
+                        private_size, readback))
+                return
 
         errors = []
         attached = []
@@ -753,9 +725,8 @@ class DictaphoneApp(App):
         intent.setType('audio/mp4')
         intent.addFlags(1)
 
-        display_name = note.get('filename') or 'Sputnik запись'
         try:
-            intent.putExtra(IntentCls.EXTRA_TITLE, StringCls(display_name))
+            intent.putExtra(IntentCls.EXTRA_TITLE, StringCls(filename))
         except Exception as e:
             print('title extra failed:', e)
 
@@ -809,7 +780,7 @@ class DictaphoneApp(App):
 
         if launched:
             self.show_status('Отправка [mp4]: файл {} б, uri {} б{}'.format(
-                private_size, uri_size, repair_msg))
+                private_size, uri_size, fresh_msg))
             return
 
         print('share errors:', errors)
@@ -876,6 +847,7 @@ class DictaphoneApp(App):
     def show_status(self, text):
         self.lbl_status.text = text
         print('[STATUS]', text)
+
 
 if __name__ == '__main__':
     DictaphoneApp().run()
