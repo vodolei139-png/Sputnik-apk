@@ -59,6 +59,63 @@ def with_bg(widget, rgba):
     return widget
 
 
+def shift_color(c, d):
+    return (
+        max(0.0, min(1.0, c[0] + d)),
+        max(0.0, min(1.0, c[1] + d)),
+        max(0.0, min(1.0, c[2] + d)),
+        1.0,
+    )
+
+
+class RaiseButton(Button):
+    """Кнопка с выпуклостью: светлая кромка сверху, тень снизу.
+    В нажатом состоянии грани меняются местами — кнопка «проседает»."""
+
+    def __init__(self, base=(0.5, 0.5, 0.5, 1), **kwargs):
+        kwargs['background_normal'] = ''
+        kwargs['background_down'] = ''
+        super(RaiseButton, self).__init__(**kwargs)
+        self.base_color = tuple(base)
+        with self.canvas.before:
+            self._col_base = Color(*self.base_color)
+            self._rect_base = Rectangle(pos=self.pos, size=self.size)
+            self._col_edge_a = Color(*shift_color(self.base_color, 0.14))
+            self._rect_edge_a = Rectangle()
+            self._col_edge_b = Color(*shift_color(self.base_color, -0.18))
+            self._rect_edge_b = Rectangle()
+        self.bind(pos=self._redraw, size=self._redraw, state=self._redraw)
+        Clock.schedule_once(lambda dt: self._redraw(), 0)
+
+    def set_base(self, color):
+        self.base_color = tuple(color)
+        self._redraw()
+
+    def _redraw(self, *args):
+        strip = max(2.0, self.height * 0.12)
+        pressed = self.state == 'down'
+        self._col_base.rgba = shift_color(
+            self.base_color, -0.04 if pressed else 0.0)
+        self._rect_base.pos = self.pos
+        self._rect_base.size = self.size
+        if pressed:
+            # вдавлено: тень сверху, свет снизу
+            self._col_edge_a.rgba = shift_color(self.base_color, -0.18)
+            self._rect_edge_a.pos = (self.x, self.y + self.height - strip)
+            self._rect_edge_a.size = (self.width, strip)
+            self._col_edge_b.rgba = shift_color(self.base_color, 0.14)
+            self._rect_edge_b.pos = (self.x, self.y)
+            self._rect_edge_b.size = (self.width, strip)
+        else:
+            # выпукло: свет сверху, тень снизу
+            self._col_edge_a.rgba = shift_color(self.base_color, 0.14)
+            self._rect_edge_a.pos = (self.x, self.y + self.height - strip)
+            self._rect_edge_a.size = (self.width, strip)
+            self._col_edge_b.rgba = shift_color(self.base_color, -0.18)
+            self._rect_edge_b.pos = (self.x, self.y)
+            self._rect_edge_b.size = (self.width, strip)
+
+
 class WatermarkLabel(Label):
     def __init__(self, angle=-30, **kwargs):
         super(WatermarkLabel, self).__init__(**kwargs)
@@ -148,39 +205,37 @@ class NoteItem(BoxLayout):
         self.add_widget(left)
 
         right = BoxLayout(orientation='horizontal', size_hint_x=0.52, spacing=3)
-        btn_play = Button(
+        btn_play = RaiseButton(
             text='СЛУШАТЬ',
             font_name=FONT_REGULAR,
             font_size='9sp',
-            background_color=(0.12, 0.45, 0.85, 1),
+            base=(0.12, 0.45, 0.85, 1),
         )
         btn_play.bind(on_release=lambda *a: on_play(self.note))
-        btn_share = Button(
+        btn_share = RaiseButton(
             text='ОТПРАВИТЬ',
             font_name=FONT_REGULAR,
             font_size='9sp',
-            background_color=(0.95, 0.55, 0.05, 1),
+            base=(0.95, 0.55, 0.05, 1),
         )
         btn_share.bind(on_release=lambda *a: on_share(self.note))
-        btn_delete = Button(
+        self.btn_delete = RaiseButton(
             text='УДАЛИТЬ',
             font_name=FONT_REGULAR,
             font_size='9sp',
-            background_color=(0.7, 0.15, 0.15, 1),
+            base=(0.7, 0.15, 0.15, 1),
         )
-        btn_delete.bind(on_release=lambda *a: self._delete_tap(on_delete))
+        self.btn_delete.bind(on_release=lambda *a: self._delete_tap(on_delete))
         right.add_widget(btn_play)
         right.add_widget(btn_share)
-        right.add_widget(btn_delete)
+        right.add_widget(self.btn_delete)
         self.add_widget(right)
-
-        self.btn_delete = btn_delete
 
     def _delete_tap(self, on_delete):
         if not self._armed:
             self._armed = True
             self.btn_delete.text = 'ТОЧНО?'
-            self.btn_delete.background_color = (0.45, 0.05, 0.05, 1)
+            self.btn_delete.set_base((0.45, 0.05, 0.05, 1))
             Clock.schedule_once(self._disarm, 3)
         else:
             self._armed = False
@@ -189,7 +244,7 @@ class NoteItem(BoxLayout):
     def _disarm(self, dt):
         self._armed = False
         self.btn_delete.text = 'УДАЛИТЬ'
-        self.btn_delete.background_color = (0.7, 0.15, 0.15, 1)
+        self.btn_delete.set_base((0.7, 0.15, 0.15, 1))
 
 
 def read_stream_size(src):
@@ -390,11 +445,11 @@ class DictaphoneApp(App):
         if not ANDROID and ANDROID_ERR:
             self.show_status('Сборка без Android-модулей: ' + ANDROID_ERR)
 
-        self.btn_record = Button(
+        self.btn_record = RaiseButton(
             text='НАЧАТЬ ЗАПИСЬ',
             font_name=FONT_BOLD,
             font_size='20sp',
-            background_color=(0.85, 0.2, 0.2, 1),
+            base=(0.85, 0.2, 0.2, 1),
             size_hint_y=None,
             height=70,
         )
@@ -539,7 +594,7 @@ class DictaphoneApp(App):
             self.is_recording = True
             self.rec_start = time.time()
             self.btn_record.text = 'ОСТАНОВИТЬ'
-            self.btn_record.background_color = (0.1, 0.6, 0.3, 1)
+            self.btn_record.set_base((0.1, 0.6, 0.3, 1))
             self.tick_timer(0)
             self.timer_event = Clock.schedule_interval(self.tick_timer, 1)
         except Exception as e:
@@ -547,7 +602,7 @@ class DictaphoneApp(App):
             self.is_recording = False
             self.recorder = None
             self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
-            self.btn_record.background_color = (0.85, 0.2, 0.2, 1)
+            self.btn_record.set_base((0.85, 0.2, 0.2, 1))
             self.show_status('Ошибка записи: ' + str(e))
 
     def stop_recording(self):
@@ -559,14 +614,14 @@ class DictaphoneApp(App):
             self.stop_timer()
             self.is_recording = False
             self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
-            self.btn_record.background_color = (0.85, 0.2, 0.2, 1)
+            self.btn_record.set_base((0.85, 0.2, 0.2, 1))
             self.publish_record()
         except Exception as e:
             self.stop_timer()
             self.is_recording = False
             self.recorder = None
             self.btn_record.text = 'НАЧАТЬ ЗАПИСЬ'
-            self.btn_record.background_color = (0.85, 0.2, 0.2, 1)
+            self.btn_record.set_base((0.85, 0.2, 0.2, 1))
             self.show_status('Ошибка остановки: ' + str(e))
 
     def publish_record(self):
