@@ -44,6 +44,7 @@ except Exception:
 
 RECORD_DIR = 'Music/Sputnik'
 NOTES_FILE = 'notes.json'
+APP_VERSION = '1.1'
 
 
 def with_bg(widget, rgba):
@@ -401,7 +402,7 @@ class DictaphoneApp(App):
         root.add_widget(wm_center)
 
         wm_corner = WatermarkLabel(
-            text='SPUTNIK • v1.0',
+            text='SPUTNIK • v' + APP_VERSION,
             font_name=FONT_REGULAR,
             font_size='14sp',
             color=(0.05, 0.2, 0.5, 0.12),
@@ -765,6 +766,7 @@ class DictaphoneApp(App):
             uri_obj, uri_str2, readback = create_media_entry(data, filename)
             if uri_obj is not None and readback == private_size:
                 note['uri'] = uri_str2
+                uri_size = readback
                 self.save_notes()
                 fresh_msg = ' (свежая запись)'
             else:
