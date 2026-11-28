@@ -31,6 +31,7 @@ try:
     BuildVersion = autoclass('android.os.Build$VERSION')
     ContentValues = autoclass('android.content.ContentValues')
     MediaStoreAudio = autoclass('android.provider.MediaStore$Audio$Media')
+    MediaStoreDownloads = autoclass('android.provider.MediaStore$Downloads')
     MediaPlayer = autoclass('android.media.MediaPlayer')
     IntentCls = autoclass('android.content.Intent')
     ClipDataCls = autoclass('android.content.ClipData')
@@ -43,8 +44,9 @@ except Exception:
     ANDROID = False
 
 RECORD_DIR = 'Music/Sputnik'
+EXPORT_DIR = 'Download/Sputnik'
 NOTES_FILE = 'notes.json'
-APP_VERSION = '1.1'
+APP_VERSION = '1.2'
 
 
 def with_bg(widget, rgba):
@@ -262,29 +264,29 @@ def read_stream_size(src):
         return len(buf)
 
 
-def create_media_entry(data, filename):
+def create_media_entry(data, filename, mime_type, collection, relative_path):
     """Создаёт свежую запись в MediaStore и возвращает (uri_obj, uri_str, размер)."""
     resolver = PythonActivity.mActivity.getContentResolver()
     values = ContentValues()
     values.put('title', filename)
     values.put('_display_name', filename)
-    values.put('mime_type', 'audio/mp4')
-    values.put('relative_path', RECORD_DIR)
+    values.put('mime_type', mime_type)
+    values.put('relative_path', relative_path)
     values.put('is_pending', '1')
 
     uri = None
     try:
-        uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values)
+        uri = resolver.insert(collection, values)
     except Exception as e:
         print('fresh insert failed:', e)
 
     if uri is None:
         values2 = ContentValues()
         values2.put('title', filename)
-        values2.put('mime_type', 'audio/mp4')
-        values2.put('relative_path', RECORD_DIR)
+        values2.put('mime_type', mime_type)
+        values2.put('relative_path', relative_path)
         try:
-            uri = resolver.insert(MediaStoreAudio.EXTERNAL_CONTENT_URI, values2)
+            uri = resolver.insert(collection, values2)
         except Exception as e:
             print('fresh base insert failed:', e)
     if uri is None:
@@ -349,7 +351,9 @@ def save_to_music(temp_path):
         sdk = 0
     result['sdk'] = sdk
     if sdk >= 29:
-        uri, uri_str, readback = create_media_entry(data, filename)
+        uri, uri_str, readback = create_media_entry(
+            data, filename, 'audio/mp4',
+            MediaStoreAudio.EXTERNAL_CONTENT_URI, RECORD_DIR)
         if uri is None:
             result['note'] = 'MediaStore: запись не создана'
             return result
@@ -447,16 +451,31 @@ class DictaphoneApp(App):
         if not ANDROID and ANDROID_ERR:
             self.show_status('Сборка без Android-модулей: ' + ANDROID_ERR)
 
+        btn_row = BoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=70,
+            spacing=8,
+        )
         self.btn_record = RaiseButton(
             text='НАЧАТЬ ЗАПИСЬ',
             font_name=FONT_BOLD,
-            font_size='20sp',
+            font_size='18sp',
             base=(0.85, 0.2, 0.2, 1),
-            size_hint_y=None,
-            height=70,
+            size_hint_x=0.68,
         )
         self.btn_record.bind(on_release=self.toggle_recording)
-        content.add_widget(self.btn_record)
+        btn_row.add_widget(self.btn_record)
+        self.btn_export = RaiseButton(
+            text='ЭКСПОРТ',
+            font_name=FONT_BOLD,
+            font_size='14sp',
+            base=(0.2, 0.5, 0.3, 1),
+            size_hint_x=0.32,
+        )
+        self.btn_export.bind(on_release=self.export_notes)
+        btn_row.add_widget(self.btn_export)
+        content.add_widget(btn_row)
 
         content.add_widget(Label(
             text='Записи: Music/Sputnik (общедоступная папка)',
@@ -507,6 +526,85 @@ class DictaphoneApp(App):
                 self.show_status('Разрешения: ' + str(e))
 
         return root
+
+    def share_uri(self, uri_obj, mime_type, title):
+        """Отправляет один uri через системное меню. Возвращает True/False."""
+        resolver = PythonActivity.mActivity.getContentResolver()
+        errors = []
+        attached = []
+
+        intent = IntentCls()
+        intent.setAction(IntentCls.ACTION_SEND)
+        intent.setType(mime_type)
+        intent.addFlags(1)
+
+        try:
+            intent.putExtra(IntentCls.EXTRA_TITLE, StringCls(title))
+        except Exception as e:
+            print('title extra failed:', e)
+
+        try:
+            label = cast('java.lang.CharSequence', StringCls('запись'))
+            clip = ClipDataCls.newUri(
+                cast('android.content.ContentResolver', resolver),
+                label, uri_obj)
+            intent.setClipData(clip)
+            attached.append('ClipData')
+        except Exception as e:
+            errors.append('ClipData: ' + str(e)[:90])
+
+        try:
+            arr = ArrayListCls()
+            arr.add(cast('android.os.Parcelable', uri_obj))
+            intent.putParcelableArrayListExtra(IntentCls.EXTRA_STREAM, arr)
+            attached.append('ArrayList')
+        except Exception as e:
+            errors.append('ArrayList: ' + str(e)[:90])
+
+        try:
+            intent.putExtra(IntentCls.EXTRA_STREAM,
+                            cast('android.os.Parcelable', uri_obj))
+            attached.append('putExtra')
+        except Exception as e:
+            errors.append('putExtra: ' + str(e)[:90])
+
+        if not attached:
+            print('share errors:', errors)
+            self.show_status('Ошибка отправки: ' + '; '.join(errors)[:300])
+            return False
+
+        launched = False
+
+        try:
+            chooser_title = cast('java.lang.CharSequence',
+                                 StringCls('Отправить запись'))
+            chooser = IntentCls.createChooser(intent, chooser_title)
+        except Exception as e:
+            errors.append('chooser: ' + str(e)[:90])
+            chooser = None
+
+        for send_intent in ([chooser, intent] if chooser else [intent]):
+            try:
+                PythonActivity.mActivity.startActivity(send_intent)
+                launched = True
+                break
+            except Exception as e:
+                errors.append('start: ' + str(e)[:90])
+
+        if launched:
+            return True
+
+        print('share errors:', errors)
+        fallback = '; '.join(errors)[:300]
+        try:
+            view_intent = IntentCls(IntentCls.ACTION_VIEW)
+            view_intent.setDataAndType(uri_obj, mime_type)
+            view_intent.addFlags(1)
+            PythonActivity.mActivity.startActivity(view_intent)
+            self.show_status('ОТКРЫЛ ПЛЕЕР. Ошибки отправки: {}'.format(fallback))
+        except Exception:
+            self.show_status('Ошибка отправки: ' + (fallback or 'нет файла'))
+        return False
 
     def stop_play(self):
         if self.play_event:
@@ -658,6 +756,70 @@ class DictaphoneApp(App):
                     result.get('readback', -1),
                     result.get('sdk', '?')))
 
+    def export_notes(self, *args):
+        if not self.notes:
+            self.show_status('Экспорт: заметок нет — экспортировать нечего')
+            return
+        lines = [
+            'Sputnik — заметки (v' + APP_VERSION + ')',
+            'Экспорт: ' + time.strftime('%d.%m.%Y %H:%M'),
+            'Всего заметок: {}'.format(len(self.notes)),
+            '',
+        ]
+        for i, note in enumerate(self.notes):
+            lines.append('--- Заметка {}'.format(i + 1))
+            lines.append('Дата: ' + note.get('date', ''))
+            lines.append('Текст: ' + (note.get('text') or '(без текста)'))
+            lines.append('Файл: ' + (note.get('filename') or '-'))
+            lines.append('')
+        text = '\n'.join(lines)
+        data = text.encode('utf-8')
+        filename = 'notes_' + time.strftime('%Y%m%d_%H%M%S') + '.txt'
+
+        if not ANDROID:
+            try:
+                path = os.path.join(self.user_data_dir, filename)
+                with open(path, 'wb') as f:
+                    f.write(data)
+                self.show_status('Экспорт (без Android): ' + path)
+            except Exception as e:
+                self.show_status('Экспорт не удался: ' + str(e)[:100])
+            return
+
+        sdk = 0
+        try:
+            sdk = int(BuildVersion.SDK_INT)
+        except Exception:
+            sdk = 0
+        if sdk >= 29:
+            uri, uri_str, readback = create_media_entry(
+                data, filename, 'text/plain',
+                MediaStoreDownloads.EXTERNAL_CONTENT_URI, EXPORT_DIR)
+            if uri is None or readback != len(data):
+                self.show_status(
+                    'Экспорт не удался: файл {} б, uri {} б'.format(
+                        len(data), readback))
+                return
+            launched = self.share_uri(uri, 'text/plain', filename)
+            if launched:
+                self.show_status(
+                    'Экспорт [txt]: {} заметок, файл {} б — сохранён в {}'.format(
+                        len(self.notes), readback, EXPORT_DIR))
+            return
+        try:
+            base = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS)
+            folder = os.path.join(str(base), 'Sputnik')
+            if not os.path.isdir(folder):
+                os.makedirs(folder)
+            with open(os.path.join(folder, filename), 'wb') as f:
+                f.write(data)
+            self.show_status(
+                'Экспорт: {} заметок сохранено в {}'.format(
+                    len(self.notes), os.path.join('Download/Sputnik', filename)))
+        except Exception as e:
+            self.show_status('Экспорт не удался: ' + str(e)[:120])
+
     def play_note(self, note):
         if not ANDROID:
             self.show_status('Воспроизведение доступно на Android')
@@ -725,8 +887,7 @@ class DictaphoneApp(App):
         if not ANDROID:
             self.show_status('Отправка доступна на Android')
             return
-        activity = PythonActivity.mActivity
-        resolver = activity.getContentResolver()
+        resolver = PythonActivity.mActivity.getContentResolver()
         uri_str = note.get('uri', '')
         private_path = note.get('path', '')
         filename = note.get('filename') or 'Sputnik запись'
@@ -763,7 +924,9 @@ class DictaphoneApp(App):
                     resolver.delete(uri_obj, None, None)
                 except Exception:
                     pass
-            uri_obj, uri_str2, readback = create_media_entry(data, filename)
+            uri_obj, uri_str2, readback = create_media_entry(
+                data, filename, 'audio/mp4',
+                MediaStoreAudio.EXTERNAL_CONTENT_URI, RECORD_DIR)
             if uri_obj is not None and readback == private_size:
                 note['uri'] = uri_str2
                 uri_size = readback
@@ -775,83 +938,10 @@ class DictaphoneApp(App):
                         private_size, readback))
                 return
 
-        errors = []
-        attached = []
-
-        intent = IntentCls()
-        intent.setAction(IntentCls.ACTION_SEND)
-        intent.setType('audio/mp4')
-        intent.addFlags(1)
-
-        try:
-            intent.putExtra(IntentCls.EXTRA_TITLE, StringCls(filename))
-        except Exception as e:
-            print('title extra failed:', e)
-
-        try:
-            label = cast('java.lang.CharSequence', StringCls('запись'))
-            clip = ClipDataCls.newUri(
-                cast('android.content.ContentResolver', resolver),
-                label, uri_obj)
-            intent.setClipData(clip)
-            attached.append('ClipData')
-        except Exception as e:
-            errors.append('ClipData: ' + str(e)[:90])
-
-        try:
-            arr = ArrayListCls()
-            arr.add(cast('android.os.Parcelable', uri_obj))
-            intent.putParcelableArrayListExtra(IntentCls.EXTRA_STREAM, arr)
-            attached.append('ArrayList')
-        except Exception as e:
-            errors.append('ArrayList: ' + str(e)[:90])
-
-        try:
-            intent.putExtra(IntentCls.EXTRA_STREAM,
-                            cast('android.os.Parcelable', uri_obj))
-            attached.append('putExtra')
-        except Exception as e:
-            errors.append('putExtra: ' + str(e)[:90])
-
-        if not attached:
-            print('share errors:', errors)
-            self.show_status('Ошибка отправки: ' + '; '.join(errors)[:300])
-            return
-
-        launched = False
-
-        try:
-            chooser_title = cast('java.lang.CharSequence',
-                                 StringCls('Отправить запись'))
-            chooser = IntentCls.createChooser(intent, chooser_title)
-        except Exception as e:
-            errors.append('chooser: ' + str(e)[:90])
-            chooser = None
-
-        for send_intent in ([chooser, intent] if chooser else [intent]):
-            try:
-                activity.startActivity(send_intent)
-                launched = True
-                break
-            except Exception as e:
-                errors.append('start: ' + str(e)[:90])
-
+        launched = self.share_uri(uri_obj, 'audio/mp4', filename)
         if launched:
             self.show_status('Отправка [mp4]: файл {} б, uri {} б{}'.format(
                 private_size, uri_size, fresh_msg))
-            return
-
-        print('share errors:', errors)
-        fallback = '; '.join(errors)[:300]
-        try:
-            view_intent = IntentCls(IntentCls.ACTION_VIEW)
-            view_intent.setDataAndType(uri_obj, 'audio/mp4')
-            view_intent.addFlags(1)
-            activity.startActivity(view_intent)
-            self.show_status('ОТКРЫЛ ПЛЕЕР. файл {} б, uri {} б. Ошибки: {}'.format(
-                private_size, uri_size, fallback))
-        except Exception:
-            self.show_status('Ошибка отправки: ' + (fallback or 'нет файла'))
 
     def load_notes(self):
         self.notes = []
